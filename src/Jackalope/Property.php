@@ -1,6 +1,8 @@
 <?php
+
 namespace Jackalope;
 
+use ArrayIterator;
 use PHPCR\PropertyType;
 
 /**
@@ -131,8 +133,8 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
             $this->length = $stat['size'];
         }
 
-        if ($this->value !== $value) {
-            //identity check will detect native variable type changes as well
+        // Need to check both value and type, as native php type string is used for a number of phpcr types
+        if ($this->value !== $value || $this->type !== $type) {
             $this->setModified();
         }
 
@@ -576,7 +578,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         if (!is_array($value)) {
             $value = array($value);
         }
-        return new \ArrayIterator($value);
+        return new ArrayIterator($value);
     }
 
 }

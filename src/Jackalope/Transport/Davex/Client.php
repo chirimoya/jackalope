@@ -200,13 +200,16 @@ class Client implements TransportInterface
      */
     protected function getRequest($method, $uri)
     {
-        // init curl
         if (!is_array($uri)) {
             $uri = array($uri => $uri);
         }
 
         if (is_null($this->curl)) {
+            // lazy init curl
             $this->curl = new curl();
+        } else if ($this->curl === false) {
+            // but do not re-connect, rather report the error if trying to access a closed connection
+            throw new \LogicException("Tried to start a request on a closed transport ($method for ".var_export($uri,true).")");
         }
 
         foreach ($uri as $key => $row) {
@@ -286,7 +289,8 @@ class Client implements TransportInterface
      */
     public function logout()
     {
-        return $this->curl->close();
+        $this->curl->close();
+        $this->curl = false;
     }
 
     /**
@@ -398,7 +402,7 @@ class Client implements TransportInterface
 
         $request = $this->getRequest(Request::GET, $paths);
         try {
-            return $request->executeJson();
+            return $request->executeJson(true);
         } catch (\PHPCR\PathNotFoundException $e) {
             throw new \PHPCR\ItemNotFoundException($e->getMessage(), $e->getCode(), $e);
         }
@@ -656,12 +660,17 @@ class Client implements TransportInterface
                 foreach ($column->childNodes as $childNode) {
                     $sets[$childNode->tagName] = $childNode->nodeValue;
                 }
+                // TODO if this bug is fixed, spaces may be urlencoded instead of the escape sequence: https://issues.apache.org/jira/browse/JCR-2997
+                // the following line fails for nodes with "_x0020 " in their name, changing that part to " x0020_"
+                // other characters like < and > are urlencoded, which seems to be handled by dom already.
+                $sets['dcr:value'] = str_replace('_x0020_', ' ', $sets['dcr:value']);
 
                 $columns[] = $sets;
             }
 
             $rows[] = $columns;
         }
+
         return $rows;
     }
 
@@ -888,6 +897,8 @@ class Client implements TransportInterface
     protected function propertyToXmlString($value, $type)
     {
         switch ($type) {
+            case \PHPCR\PropertyType::TYPENAME_BOOLEAN:
+                return $value ? 'true' : 'false';
             case \PHPCR\PropertyType::TYPENAME_DATE:
                 return PropertyType::convertType($value, PropertyType::STRING);
             case \PHPCR\PropertyType::TYPENAME_BINARY:
@@ -898,7 +909,6 @@ class Client implements TransportInterface
                 $value = str_replace(']]>',']]]]><![CDATA[>',$value);
                 return '<![CDATA['.$value.']]>';
         }
-        //FIXME: handle boolean correctly. strings true and false?
         return $value;
     }
 
@@ -1273,7 +1283,7 @@ class Client implements TransportInterface
     {
         if (! (strpos($path, '//') === false
               && strpos($path, '/../') === false
-              && preg_match('/^[\w{}\/#:^+~*\[\]\. -]*$/i', $path))
+              && preg_match('/^[\w{}\/#:^+~*\[\]\. <>"\'-]*$/i', $path))
         ) {
             throw new \PHPCR\RepositoryException('Path is not well-formed or contains invalid characters: ' . $path);
         }

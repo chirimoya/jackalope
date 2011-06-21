@@ -252,9 +252,9 @@ class Request
      *
      * @return string|array of XML representation of the response.
      */
-    public function execute($getCurlObject = false)
+    public function execute($getCurlObject = false, $forceMultiple = false)
     {
-        if (count($this->uri) === 1) {
+        if (!$forceMultiple && count($this->uri) === 1) {
             return $this->singleRequest($getCurlObject);
         }
         return $this->multiRequest($getCurlObject);
@@ -414,16 +414,16 @@ class Request
         }
 
         if (404 === $httpCode) {
-            throw new \PHPCR\PathNotFoundException("HTTP 404 Path Not Found: {$this->method} {$this->uri}");
+            throw new \PHPCR\PathNotFoundException("HTTP 404 Path Not Found: {$this->method} ".var_export($this->uri, true));
         } elseif (405 == $httpCode) {
-            throw new \Jackalope\Transport\Davex\HTTPErrorException("HTTP 405 Method Not Allowed: {$this->method} {$this->uri}", 405);
+            throw new \Jackalope\Transport\Davex\HTTPErrorException("HTTP 405 Method Not Allowed: {$this->method} ".var_export($this->uri, true), 405);
         } elseif ($httpCode >= 500) {
-            throw new \PHPCR\RepositoryException("HTTP $httpCode Error from backend on: {$this->method} {$this->uri} \n\n$response");
+            throw new \PHPCR\RepositoryException("HTTP $httpCode Error from backend on: {$this->method} ".var_export($this->uri, true)."\n\n$response");
         }
 
         $curlError = $curl->error();
 
-        $msg = "Unexpected error: \nCURL Error: $curlError \nResponse (HTTP $httpCode): {$this->method} {$this->uri} \n\n$response";
+        $msg = "Unexpected error: \nCURL Error: $curlError \nResponse (HTTP $httpCode): {$this->method} ".var_export($this->uri, true)."\n\n$response";
         throw new \PHPCR\RepositoryException($msg);
     }
 
@@ -435,9 +435,9 @@ class Request
      *
      * @return DOMDocument The loaded XML response text.
      */
-    public function executeDom()
+    public function executeDom($forceMultiple = false)
     {
-        $xml = $this->execute();
+        $xml = $this->execute(null, $forceMultiple);
 
         // create new DOMDocument and load the response text.
         $dom = new \DOMDocument();
@@ -455,9 +455,9 @@ class Request
      *
      * @throws \PHPCR\RepositoryException if the json response is not valid
      */
-    public function executeJson()
+    public function executeJson($forceMultiple = false)
     {
-        $responses = $this->execute();
+        $responses = $this->execute(null, $forceMultiple);
         if (!is_array($responses)) {
             $responses = array($responses);
             $reset = true;
