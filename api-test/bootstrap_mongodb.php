@@ -54,9 +54,23 @@ function getRepository($config) {
     
     $coll = $db->selectCollection('jcrworkspaces');
     $workspace = array(
+        '_id'  => new \MongoId('4e00e8fea381601b08000000'),
         'name' => $config['workspace']
     );
     $coll->insert($workspace);
+    
+    $coll = $db->selectCollection('jcrnodes');
+    $id = new \MongoId();
+    $node = array(
+        '_id' => array('$oid' => $id->__toString()),
+        'uuid' => '',
+        'path' => '',
+        'parent' => '-1',
+        'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
+        'type' => 'nt:unstructured',
+        'properties' => array()
+    );
+    $coll->insert($node);
 
     $transport = new \Jackalope\Transport\MongoDB\Client($dbConn, $db);
     return new \Jackalope\Repository(null, null, $transport);
@@ -118,7 +132,11 @@ class MongoDbFixtureLoader implements phpcrApiTestSuiteImportExportFixtureInterf
 
     public function import($file)
     {
-        //TODO
+        $file = $this->fixturePath . $file . ".json";
+        
+        //FIXME
+        exec('mongoimport --db jcrtests --collection jcrnodes --type json --file ' . $file . ' --jsonArray 2>&1', $out);
+        
     }
 }
 

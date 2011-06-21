@@ -352,22 +352,24 @@ class Client implements TransportInterface
         
         $coll = $this->db->selectCollection('jcrnodes');
         $qb = $coll->createQueryBuilder()
-                   ->field('workspace_id')->equals($path)
-                   ->field('path')->equals($this->workspaceId);
+                   ->field('path')->equals($path)
+                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId->__toString()));
 
         $query = $qb->getQuery();
         $node = $query->getSingleResult();
-
+        
         if (!$node) {
             throw new \PHPCR\ItemNotFoundException("Item /".$path." not found.");
         }
 
         $data = new \stdClass();
         // TODO: only return jcr:uuid when this node implements mix:referencable
-        $data->{'jcr:uuid'} = $node['identifier'];
+        $data->{'jcr:uuid'} = $node['uuid'];
         $data->{'jcr:primaryType'} = $node['type'];
-        $this->nodeIdentifiers[$path] = $node['identifier'];
+        $this->nodeIdentifiers[$path] = $node['uuid'];
 
+        //TODO load childs
+        /*
         $sql = "SELECT path FROM jcrnodes WHERE parent = ? AND workspace_id = ?";
         $children = $this->conn->fetchAll($sql, array($path, $this->workspaceId));
 
@@ -375,58 +377,8 @@ class Client implements TransportInterface
             $childName = explode("/", $child['path']);
             $childName = end($childName);
             $data->{$childName} = new \stdClass();
-        }
+        }*/
 
-        $sql = "SELECT * FROM jcrprops WHERE node_identifier = ?";
-        $props = $this->conn->fetchAll($sql, array($data->{'jcr:uuid'}));
-
-        foreach ($props AS $prop) {
-            $value = null;
-            $type = (int)$prop['type'];
-            switch ($type) {
-                case \PHPCR\PropertyType::NAME:
-                case \PHPCR\PropertyType::URI:
-                case \PHPCR\PropertyType::WEAKREFERENCE:
-                case \PHPCR\PropertyType::REFERENCE:
-                case \PHPCR\PropertyType::PATH:
-                case \PHPCR\PropertyType::DECIMAL:
-                    $value = $prop['string_data'];
-                    break;
-                case \PHPCR\PropertyType::STRING:
-                    $value = $prop['clob_data']; // yah, go figure!
-                    break;
-                case \PHPCR\PropertyType::BOOLEAN:
-                    $value = (bool)$prop['int_data'];
-                    break;
-                case \PHPCR\PropertyType::LONG:
-                    $value = (int)$prop['int_data'];
-                    break;
-                case \PHPCR\PropertyType::BINARY:
-                    $value = (int)$prop['int_data'];
-                    break;
-                case \PHPCR\PropertyType::DATE:
-                    $value = $prop['datetime_data'];
-                    break;
-                case \PHPCR\PropertyType::DOUBLE:
-                    $value = (double)$prop['float_data'];
-                    break;
-            }
-
-            if ($type == \PHPCR\PropertyType::BINARY) {
-                if ($prop['multi_valued'] == 1) {
-                    $data->{":" . $prop['name']}[$prop['idx']] = $value;
-                } else {
-                    $data->{":" . $prop['name']} = $value;
-                }
-            } else {
-                if ($prop['multi_valued'] == 1) {
-                    $data->{$prop['name']}[$prop['idx']] = $value;
-                } else {
-                    $data->{$prop['name']} = $value;
-                }
-                $data->{":" . $prop['name']} = $type;
-            }
-        }
 
         return $data;
     }
