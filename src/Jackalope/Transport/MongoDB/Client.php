@@ -353,7 +353,7 @@ class Client implements TransportInterface
         $coll = $this->db->selectCollection('jcrnodes');
         $qb = $coll->createQueryBuilder()
                    ->field('path')->equals($path)
-                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId->__toString()));
+                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId));
 
         $query = $qb->getQuery();
         $node = $query->getSingleResult();
@@ -364,9 +364,11 @@ class Client implements TransportInterface
 
         $data = new \stdClass();
         // TODO: only return jcr:uuid when this node implements mix:referencable
-        $data->{'jcr:uuid'} = $node['uuid'];
+        if($node['_id'] instanceof \MongoBinData) {
+            $data->{'jcr:uuid'} = $node['_id']->bin;
+        }
         $data->{'jcr:primaryType'} = $node['type'];
-        $this->nodeIdentifiers[$path] = $node['uuid'];
+        $this->nodeIdentifiers[$path] = $node['_id'];
 
         //TODO load childs
         /*

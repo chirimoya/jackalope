@@ -60,13 +60,10 @@ function getRepository($config) {
     $coll->insert($workspace);
     
     $coll = $db->selectCollection('jcrnodes');
-    $id = new \MongoId();
     $node = array(
-        '_id' => array('$oid' => $id->__toString()),
-        'uuid' => '',
         'path' => '',
         'parent' => '-1',
-        'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
+        'workspace_id' => MongoDBRef::create('jcrworkspaces', new \MongoId('4e00e8fea381601b08000000')),
         'type' => 'nt:unstructured',
         'properties' => array()
     );

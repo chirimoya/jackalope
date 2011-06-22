@@ -52,7 +52,6 @@ foreach ($ri AS $file) {
         // system-view
         $dataSet[] = array(
             '_id' => array('$oid' => $id->__toString()),
-            'uuid' => '',
             'path' => '',
             'parent' => '-1',
             'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
@@ -90,21 +89,21 @@ foreach ($ri AS $file) {
                 }
             }
 
-            $uuid = '';
             if (isset($attrs['jcr:uuid']['value'][0])) {
                 $id = (string) $attrs['jcr:uuid']['value'][0];
+                $id = new \MongoBinData($id, MongoBinData::UUID);
+                $id = array('$binary' => base64_encode($id->bin), '$type' => (string) sprintf('%02d', $id->type));
                 unset($attrs['jcr:uuid']['value'][0]);
+            }else{  
+                $id = new \MongoId;
+                $id = array('$oid' =>  $id->__toString());
             }
-            
-            $id = new \MongoId;
-            $id = $id->__toString();
             
             $type = $attrs['jcr:primaryType']['value'][0];
             unset($attrs['jcr:primaryType']);
             
             $dataSet[] = array(
-                '_id' => array('$oid' => $id),
-                'uuid' => $uuid,
+                '_id' => $id,
                 'path' => $path,
                 'parent' => implode("/", array_slice(explode("/", $path), 0, -1)),
                 'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
@@ -145,22 +144,22 @@ foreach ($ri AS $file) {
                     $attrs['jcr:primaryType'] = 'nt:unstructured';
                 }
 
-                $uuid = '';
                 if (isset($attrs['jcr:uuid'])) {
-                    $uuid = $attrs['jcr:uuid'];
+                    $id = (string) $attrs['jcr:uuid'];
+                    $id = new \MongoBinData($id, MongoBinData::UUID);
+                    $id = array('$binary' => $id->__toString(), '$type' => MongoBinData::UUID);
                     unset($attrs['jcr:uuid']);
+                }else{  
+                    $id = new \MongoId;
+                    $id = array('$oid' =>  $id->__toString());
                 }
-                
-                $id = new \MongoId();
-                $id = $id->__toString();
                     
                 $type = $attrs['jcr:primaryType'];
                 unset($attrs['jcr:primaryType']);
                 
                 if (!isset($seenPaths[$path])) {
                     $dataSet[] = array(
-                        '_id' => array('$oid' => $id),
-                        'uuid' => $uuid,
+                        '_id' => $id,
                         'path' => $path,
                         'parent' => implode("/", array_slice(explode("/", $path), 0, -1)),
                         'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
