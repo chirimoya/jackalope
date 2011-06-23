@@ -226,12 +226,14 @@ class Client implements TransportInterface
     public function getNamespaces()
     {
         if ($this->userNamespaces === null) {
-            $data = $this->conn->fetchAll('SELECT * FROM jcrnamespaces');
+            $coll = $this->db->selectCollection('jcrnamespaces');
+            
+            $namespaces = $coll->find();
             $this->userNamespaces = array();
-
-            foreach ($data AS $row) {
-                $this->validNamespacePrefixes[$row['prefix']] = true;
-                $this->userNamespaces[$row['prefix']] = $row['uri'];
+            
+            foreach ($namespaces AS $namespace) {
+                $this->validNamespacePrefixes[$namespace['prefix']] = true;
+                $this->userNamespaces[$namespace['prefix']] = $namespace['uri'];
             }
         }
         return $this->userNamespaces;
@@ -328,9 +330,13 @@ class Client implements TransportInterface
      */
     public function getAccessibleWorkspaceNames()
     {
+        $coll = $this->db->selectCollection('jcrworkspaces');
+        
+        $workspaces = $coll->find();
+        
         $workspaceNames = array();
-        foreach ($this->conn->fetchAll("SELECT name FROM jcrworkspaces") AS $row) {
-            $workspaceNames[] = $row['name'];
+        foreach ($workspaces AS $workspace) {
+            $workspaceNames[] = $workspace['name'];
         }
         return $workspaceNames;
     }
@@ -363,6 +369,7 @@ class Client implements TransportInterface
         }
 
         $data = new \stdClass();
+        
         // TODO: only return jcr:uuid when this node implements mix:referencable
         if($node['_id'] instanceof \MongoBinData) {
             $data->{'jcr:uuid'} = $node['_id']->bin;

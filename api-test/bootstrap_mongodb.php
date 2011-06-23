@@ -42,7 +42,6 @@ require_once(dirname(__FILE__) . '/../src/Jackalope/autoloader.php');
 
 $dbConn = new \Doctrine\MongoDB\Connection($GLOBALS['jcr.doctrine.mongodb.server']);
 $db = $dbConn->selectDatabase($GLOBALS['jcr.doctrine.mongodb.dbname']);
-$db->drop();
 
 /**
  * Repository lookup is implementation specific.
@@ -52,10 +51,12 @@ $db->drop();
 function getRepository($config) {
     global $dbConn, $db;
     
+    $db->drop();
+    
     $coll = $db->selectCollection('jcrworkspaces');
     $workspace = array(
         '_id'  => new \MongoId('4e00e8fea381601b08000000'),
-        'name' => $config['workspace']
+        'name' => empty($config['workspace']) ? 'default' : 'tests'
     );
     $coll->insert($workspace);
     
