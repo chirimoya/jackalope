@@ -50,14 +50,14 @@ foreach ($ri AS $file) {
     if ($nodes->length > 0) {
         $id = new \MongoId();
         // system-view
-        $dataSet[] = array(
+        /*$dataSet[] = array(
             '_id' => array('$oid' => $id->__toString()),
-            'path' => '',
+            'path' => '/',
             'parent' => '-1',
-            'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
+            'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => array('$oid' => '4e00e8fea381601b08000000')),
             'type' => 'nt:unstructured',
-            'properties' => array()
-        );
+            'properties' => new stdClass()
+        );*/
         
         foreach ($nodes AS $node) {
             /* @var $node DOMElement */
@@ -69,7 +69,7 @@ foreach ($ri AS $file) {
                 }
                 $parent = $parent->parentNode;
             } while ($parent instanceof DOMElement);
-            $path = ltrim($path, '/');
+            //$path = ltrim($path, '/');
 
             $attrs = array();
             foreach ($node->childNodes AS $child) {
@@ -102,11 +102,14 @@ foreach ($ri AS $file) {
             $type = $attrs['jcr:primaryType']['value'][0];
             unset($attrs['jcr:primaryType']);
             
+            $parentPath = implode("/", array_slice(explode("/", $path), 0, -1));
+            $parentPath = ($parentPath == '') ? '/' : $parentPath;
+            
             $dataSet[] = array(
                 '_id' => $id,
                 'path' => $path,
-                'parent' => implode("/", array_slice(explode("/", $path), 0, -1)),
-                'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
+                'parent' => $parentPath,
+                'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => array('$oid' => '4e00e8fea381601b08000000')),
                 'type' => $type,
                 'properties' => $attrs
             );
@@ -114,14 +117,14 @@ foreach ($ri AS $file) {
     } else {
         $id = new \MongoId;
         // document-view
-        $dataSet[] = array(
+        /*$dataSet[] = array(
             '_id' => array('$oid' => $id->__toString()),
-            'path' => '',
+            'path' => '/',
             'parent' => '-1',
-            'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
+            'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => array('$oid' => '4e00e8fea381601b08000000')),
             'type' => 'nt:unstructured',
-            'properties' => array()
-        );
+            'properties' => new stdClass()
+        );*/
 
         $nodes = $srcDom->getElementsByTagName('*');
         foreach ($nodes AS $node) {
@@ -132,7 +135,7 @@ foreach ($ri AS $file) {
                     $path = "/" . $parent->tagName . $path;
                     $parent = $parent->parentNode;
                 } while ($parent instanceof DOMElement);
-                $path = ltrim($path, '/');
+                //$path = ltrim($path, '/');
 
                 $attrs = array();
                 foreach ($node->attributes AS $attr) {
@@ -158,11 +161,14 @@ foreach ($ri AS $file) {
                 unset($attrs['jcr:primaryType']);
                 
                 if (!isset($seenPaths[$path])) {
+                    $parentPath = implode("/", array_slice(explode("/", $path), 0, -1));
+                    $parentPath = ($parentPath == '') ? '/' : $parentPath;
+            
                     $dataSet[] = array(
                         '_id' => $id,
                         'path' => $path,
-                        'parent' => implode("/", array_slice(explode("/", $path), 0, -1)),
-                        'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => '4e00e8fea381601b08000000'),
+                        'parent' => $parentPath,
+                        'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => array('$oid' => '4e00e8fea381601b08000000')),
                         'type' => 'nt:unstructured',
                         'properties' => $attrs
                     );

@@ -42,6 +42,30 @@ require_once(dirname(__FILE__) . '/../src/Jackalope/autoloader.php');
 
 $dbConn = new \Doctrine\MongoDB\Connection($GLOBALS['jcr.doctrine.mongodb.server']);
 $db = $dbConn->selectDatabase($GLOBALS['jcr.doctrine.mongodb.dbname']);
+$db->drop();
+
+$coll = $db->selectCollection('jcrworkspaces');
+$workspace = array(
+    'name' => 'default'
+);
+$coll->insert($workspace);
+
+$coll = $db->selectCollection('jcrworkspaces');
+$workspace = array(
+    '_id'  => new \MongoId('4e00e8fea381601b08000000'),
+    'name' => $GLOBALS['jcr.workspace']
+);
+$coll->insert($workspace);
+
+$coll = $db->selectCollection('jcrnodes');
+$node = array(
+    'path' => '/',
+    'parent' => '-1',
+    'workspace_id' => MongoDBRef::create('jcrworkspaces', new \MongoId('4e00e8fea381601b08000000')),
+    'type' => 'nt:unstructured',
+    'properties' => new stdClass()
+);
+$coll->insert($node);
 
 /**
  * Repository lookup is implementation specific.
@@ -50,25 +74,6 @@ $db = $dbConn->selectDatabase($GLOBALS['jcr.doctrine.mongodb.dbname']);
  */
 function getRepository($config) {
     global $dbConn, $db;
-    
-    $db->drop();
-    
-    $coll = $db->selectCollection('jcrworkspaces');
-    $workspace = array(
-        '_id'  => new \MongoId('4e00e8fea381601b08000000'),
-        'name' => empty($config['workspace']) ? 'default' : 'tests'
-    );
-    $coll->insert($workspace);
-    
-    $coll = $db->selectCollection('jcrnodes');
-    $node = array(
-        'path' => '',
-        'parent' => '-1',
-        'workspace_id' => MongoDBRef::create('jcrworkspaces', new \MongoId('4e00e8fea381601b08000000')),
-        'type' => 'nt:unstructured',
-        'properties' => array()
-    );
-    $coll->insert($node);
 
     $transport = new \Jackalope\Transport\MongoDB\Client($dbConn, $db);
     return new \Jackalope\Repository(null, null, $transport);

@@ -24,6 +24,7 @@ namespace Jackalope\Transport\MongoDB;
 
 use PHPCR\PropertyType;
 use PHPCR\RepositoryException;
+use PHPCR\Util\UUIDHelper;
 use Jackalope\TransportInterface;
 use Jackalope\Helper;
 use Jackalope\NodeType\NodeTypeManager;
@@ -281,44 +282,32 @@ class Client implements TransportInterface
         if (!$this->pathExists($this->getParentPath($dstAbsPath))) {
             throw new \PHPCR\PathNotFoundException("Parent of the destination path '" . $this->getParentPath($dstAbsPath) . "' has to exist.");
         }
-
-        // Algorithm:
-        // 1. Select all nodes with path $srcAbsPath."%" and iterate them
-        // 2. create a new node with path $dstAbsPath + leftovers, with a new uuid. Save old => new uuid
-        // 3. copy all properties from old node to new node
-        // 4. if a reference is in the properties, either update the uuid based on the map if its inside the copied graph or keep it.
-        // 5. "May drop mixin types"
-
-        $this->conn->beginTransaction();
-
+        
         try {
 
-            $sql = "SELECT * FROM jcrnodes WHERE path LIKE ? AND workspace_id = ?";
-            $stmt = $this->conn->executeQuery($sql, array($srcAbsPath . "%", $workspaceId));
-
-            while ($row = $stmt->fetch(\PDO::FETCH_ASSOC)) {
-                $newPath = str_replace($srcAbsPath, $dstAbsPath, $row['path']);
-                $uuid = Helper::generateUUID();
-                $this->conn->insert("jcrnodes", array(
-                    'identifier' => $uuid,
-                    'type' => $row['type'],
-                    'path' => $newPath,
-                    'parent' => $this->getParentPath($newPath),
-                    'workspace_id' => $this->workspaceId,
-                ));
-
-                $sql = "SELECT * FROM jcrprops WHERE node_identifier = ?";
-                $propStmt = $this->conn->executeQuery($sql, array($row['identifier']));
-
-                while ($propRow = $propStmt->fetch(\PDO::FETCH_ASSOC)) {
-                    $propRow['node_identifier'] = $uuid;
-                    $propRow['path'] = str_replace($srcAbsPath, $dstAbsPath, $propRow['path']);
-                    $this->conn->insert('jcrprops', $propRow);
-                }
+            $regex = new \MongoRegex('/^' . addcslashes($srcAbsPath, '/') . '/'); 
+            
+            $coll = $this->db->selectCollection('jcrnodes');
+            $qb = $coll->createQueryBuilder()
+                       ->field('path')->equals($regex)
+                       ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $workspaceId));
+    
+            $query = $qb->getQuery();
+            $nodes = $query->getIterator();
+            
+            foreach ($nodes as $node){
+                $newPath = str_replace($srcAbsPath, $dstAbsPath, $node['path']);
+                $uuid = UUIDHelper::generateUUID();
+                
+                $node['_id'] = new \MongoBinData($uuid, \MongoBinData::UUID);
+                $node['path'] = $newPath;
+                $node['parent'] = $this->getParentPath($newPath);
+                $node['workspace_id'] = \MongoDBRef::create('jcrworkspaces', $this->workspaceId);
+                
+                $coll->insert($node);
             }
-            $this->conn->commit();
+            
         } catch (\Exception $e) {
-            $this->conn->rollBack();
             throw $e;
         }
     }
@@ -342,13 +331,62 @@ class Client implements TransportInterface
     }
 
     /**
-     * Get the item from an absolute path
+     * Get the node from an absolute path
      *
-     * TODO: should we call this getNode? does not work for property. (see ObjectManager::getPropertyByPath for more on properties)
+     * Returns a json_decode stdClass structure that contains two fields for
+     * each property and one field for each child.
+     * A child is just containing an empty class as value (in the future we
+     * could use this for eager loading with recursive structure).
+     * A property consists of a field named as the property is and a value that
+     * is the property value, plus a second field with the same name but
+     * prefixed with a colon that has a type specified as value (out of the
+     * string constants from PropertyType)
      *
-     * @param string $path Absolute path to identify a special item.
-     * @return array for the node (decoded from json)
+     * For binary properties, the value of the type declaration is not the type
+     * but the length of the binary, thus integer instead of string.
+     * There is no value field for binary data (to avoid loading large amount
+     * of unneeded data)
+     * Use getBinaryStream to get the actual data of a binary property.
      *
+     * There is a couple of "magic" properties:
+     * <ul>
+     *   <li>jcr:uuid - the unique id of the node</li>
+     *   <li>jcr:primaryType - name of the primary type</li>
+     *   <li>jcr:mixinTypes - comma separated list of mixin types</li>
+     *   <li>jcr:index - the index of same name siblings</li>
+     * </ul>
+     *
+     * @example Return struct
+     * <code>
+     * object(stdClass)#244 (4) {
+     *      ["jcr:uuid"]=>
+     *          string(36) "64605997-e298-4334-a03e-673fc1de0911"
+     *      [":jcr:primaryType"]=>
+     *          string(4) "Name"
+     *      ["jcr:primaryType"]=>
+     *          string(8) "nt:unstructured"
+     *      ["myProperty"]=>
+     *          string(4) "test"
+     *      [":myProperty"]=>
+     *          string(5) "String" //one of \PHPCR\PropertyTypeInterface::TYPENAME_NAME
+     *      [":myBinary"]=>
+     *          int 1538    //length of binary file, no "myBinary" field present
+     *      ["childNodeName"]=>
+     *          object(stdClass)#152 (0) {}
+     *      ["otherChild"]=>
+     *          object(stdClass)#153 (0) {}
+     * }
+     * </code>
+     *
+     * Note: the reason to use json_decode with associative = false is that the
+     * array version can not distinguish between
+     *   ['foo', 'bar'] and {0: 'foo', 1: 'bar'}
+     * The first are properties, but the later is a list of children nodes.
+     *
+     * @param string $path Absolute path to the node.
+     * @return array associative array for the node (decoded from json with associative = true)
+     *
+     * @throws \PHPCR\ItemNotFoundException If the item at path was not found
      * @throws \PHPCR\RepositoryException if not logged in
      */
     public function getNode($path)
@@ -365,7 +403,7 @@ class Client implements TransportInterface
         $node = $query->getSingleResult();
         
         if (!$node) {
-            throw new \PHPCR\ItemNotFoundException("Item /".$path." not found.");
+            throw new \PHPCR\ItemNotFoundException("Item ".$path." not found.");
         }
 
         $data = new \stdClass();
@@ -376,18 +414,22 @@ class Client implements TransportInterface
         }
         $data->{'jcr:primaryType'} = $node['type'];
         $this->nodeIdentifiers[$path] = $node['_id'];
+        
+        //TODO prepare properties
+        
+        
+        $qb = $coll->createQueryBuilder()
+                   ->field('parent')->equals($path)
+                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId));
 
-        //TODO load childs
-        /*
-        $sql = "SELECT path FROM jcrnodes WHERE parent = ? AND workspace_id = ?";
-        $children = $this->conn->fetchAll($sql, array($path, $this->workspaceId));
-
+        $query = $qb->getQuery();
+        $children = $query->getIterator();
+        
         foreach ($children AS $child) {
             $childName = explode("/", $child['path']);
             $childName = end($childName);
             $data->{$childName} = new \stdClass();
-        }*/
-
+        }
 
         return $data;
     }
@@ -402,7 +444,16 @@ class Client implements TransportInterface
      */
     public function getNodes($paths)
     {
-        throw new \Jackalope\NotImplementedException();
+        $nodes = array();
+        foreach ($paths as $key => $path) {
+            try {
+                $nodes[$key] = $this->getNode($path);
+            } catch (\PHPCR\ItemNotFoundException $e) {
+                // ignore
+            }
+        }
+
+        return $nodes;
     }
 
 
@@ -451,8 +502,15 @@ class Client implements TransportInterface
 
     private function pathExists($path)
     {
-        $query = "SELECT identifier FROM jcrnodes WHERE path = ? AND workspace_id = ?";
-        if (!$this->conn->fetchColumn($query, array($path, $this->workspaceId))) {
+        $coll = $this->db->selectCollection('jcrnodes');
+        
+        $qb = $coll->createQueryBuilder()
+                   ->field('path')->equals($path)
+                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId));
+        
+        $query = $qb->getQuery();
+        
+        if (!$query->getSingleResult()) {
             return false;
         }
         return true;
@@ -605,12 +663,11 @@ class Client implements TransportInterface
     }
 
     /**
-     * Stores a node to the given absolute path
+     * Recursively store a node and its children to the given absolute path.
      *
-     * @param string $path Absolute path to identify a special item.
-     * @param \PHPCR\NodeType\NodeTypeInterface $primaryType
-     * @param \Traversable $properties array of \PHPCR\PropertyInterface objects
-     * @param \Traversable $children array of \PHPCR\NodeInterface objects
+     * Transport stores the node at its path, with all properties and all children
+     *
+     * @param \PHPCR\NodeInterface $node the node to store
      * @return bool true on success
      *
      * @throws \PHPCR\RepositoryException if not logged in
@@ -620,7 +677,11 @@ class Client implements TransportInterface
         $path = $node->getPath();
         $path = $this->trimPath($path);
         $this->assertLoggedIn();
-
+        
+        
+        // getting the property definitions is a copy of the DoctrineDBAL 
+        // implementation - maybe there is a better way?
+        
         // This is very slow i believe :-(
         $nodeDef = $node->getPrimaryNodeType();
         $nodeTypes = $node->getMixinNodeTypes();
@@ -640,7 +701,7 @@ class Client implements TransportInterface
                 if ($itemDef->getName() == '*') {
                     continue;
                 }
-
+                
                 if (isset($popertyDefs[$itemDef->getName()])) {
                     throw new \PHPCR\RepositoryException("DoctrineTransport does not support child/property definitions for the same subpath.");
                 }
@@ -651,27 +712,37 @@ class Client implements TransportInterface
 
         $properties = $node->getProperties();
 
-        $this->conn->beginTransaction();
-
         try {
-            $nodeIdentifier = (isset($properties['jcr:uuid'])) ? $properties['jcr:uuid']->getNativeValue() : Helper::generateUUID();
-            if (!$this->pathExists($path)) {
-                $this->conn->insert("jcrnodes", array(
-                    'identifier' => $nodeIdentifier,
-                    'type' => isset($properties['jcr:primaryType']) ? $properties['jcr:primaryType']->getValue() : "nt:unstructured",
-                    'path' => $path,
-                    'parent' => $this->getParentPath($path),
-                    'workspace_id' => $this->workspaceId,
-                ));
-            }
-            $this->nodeIdentifiers[$path] = $nodeIdentifier;
-
+            $nodeIdentifier = (isset($properties['jcr:uuid'])) ? $properties['jcr:uuid']->getNativeValue() :  UUIDHelper::generateUUID();
+            
+            // TODO prepare properties
+            /*
             foreach ($properties AS $property) {
                 $this->doStoreProperty($property, $popertyDefs);
+            }*/
+            
+            $coll = $this->db->selectCollection('jcrnodes');
+            if (!$this->pathExists($path)) {
+                $data = array(
+                    '_id'           => new \MongoBinData($nodeIdentifier, \MongoBinData::UUID),
+                    'path'          => $path,
+                    'parent'        => $this->getParentPath($path),
+                    'workspace_id'  => \MongoDBRef::create('jcrworkspaces', $this->workspaceId),
+                    'type'          => isset($properties['jcr:primaryType']) ? $properties['jcr:primaryType']->getValue() : 'nt:unstructured',
+                    'properties'    => new \stdClass()
+                );
+                $coll->insert($data);
+            }else{
+                
             }
-            $this->conn->commit();
+            
+            $this->nodeIdentifiers[$path] = $nodeIdentifier;
+            
+            if ($node->hasNodes()) {
+                // TODO save all chiles?
+            }            
+            
         } catch(\Exception $e) {
-            $this->conn->rollBack();
             throw new \PHPCR\RepositoryException("Storing node " . $node->getPath() . " failed: " . $e->getMessage(), null, $e);
         }
 
@@ -688,8 +759,35 @@ class Client implements TransportInterface
      * @throws \PHPCR\RepositoryException if not logged in
      */
     public function storeProperty(\PHPCR\PropertyInterface $property)
-    {
-        return $this->doStoreProperty($property, array());
+    {   
+        $path = $property->getPath();
+        $path = $this->trimPath($path);
+        
+        $parent = $property->getParent();
+        $parentPath = $this->trimPath($parent->getPath());
+
+        $typeId = $property->getType();
+        $type = PropertyType::nameFromValue($typeId);
+        $nativeValue = $property->getValueForStorage();
+        
+        // TODO validate types
+        $data = array(
+            't'  => $type,
+            'v'  => $nativeValue
+        );
+        
+        $coll = $this->db->selectCollection('jcrnodes');
+        $qb = $coll->createQueryBuilder()
+                   ->update()
+                   ->upsert()
+                   ->field('properties.' . $property->getName())->set($data)
+                   ->field('path')->equals($parentPath)
+                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId));
+        $query = $qb->getQuery();
+        
+        return $query->execute();
+        
+        //return $this->doStoreProperty($property, array());
     }
 
     /**
@@ -972,15 +1070,22 @@ $/xi";
 
     public function registerNamespace($prefix, $uri)
     {
-        $this->conn->insert('jcrnamespaces', array(
+        $coll = $this->db->selectCollection('jcrnamespaces');
+        $namespace = array(
             'prefix' => $prefix,
             'uri' => $uri,
-        ));
+        );
+        $coll->insert($namespace);
     }
 
     public function unregisterNamespace($prefix)
     {
-        $this->conn->delete('jcrnamespaces', array('prefix' => $prefix));
+        $coll = $this->db->selectCollection('jcrnamespaces');
+        $qb = $coll->createQueryBuilder()
+                   ->field('prefix')->equals($prefix);
+        
+        $query = $qb->getQuery();
+        $coll->remove($query);
     }
 
     /**
@@ -1055,7 +1160,7 @@ $/xi";
     {
         $this->ensureValidPath($path);
 
-        return ltrim($path, "/");
+        return $path; // ltrim($path, "/");
     }
 
     protected function ensureValidPath($path)
