@@ -107,11 +107,13 @@ class Client implements TransportInterface
     /**
      * Create a transport pointing to a server url.
      *
+     * @param object $factory  an object factory implementing "get" as described in \Jackalope\Factory.
      * @param Doctrine\MongoDB\Connection $conn
      * @param Doctrine\MongoDB\Database $db
      */
-    public function __construct(Connection $conn, Database $db)
+    public function __construct($factory, Connection $conn, Database $db)
     {
+        $this->factory = $factory;
         $this->conn = $conn;
         $this->db = $db;
     }
@@ -408,7 +410,6 @@ class Client implements TransportInterface
 
         $data = new \stdClass();
         
-        // TODO: only return jcr:uuid when this node implements mix:referencable
         if($node['_id'] instanceof \MongoBinData) {
             $data->{'jcr:uuid'} = $node['_id']->bin;
         }
@@ -416,7 +417,28 @@ class Client implements TransportInterface
         $this->nodeIdentifiers[$path] = $node['_id'];
         
         //TODO prepare properties
-        
+        foreach ($node['properties'] as $name => $prop) {
+            $type = $prop['type'];
+            
+            if ($type == \PHPCR\PropertyType::TYPENAME_BINARY) {
+                if (isset($prop['multiValued']) && $prop['multiValued'] == true) {
+                    foreach ($prop['value'] as $value) {
+                        $data->{":" . $name}[] = 0; //FIXME
+                    }
+                } else {
+                    $data->{":" . $name} = 0; //FIXME
+                }
+            } else {
+                if (isset($prop['multiValued']) && $prop['multiValued'] == true) {
+                    foreach ($prop['value'] as $value) {
+                        $data->{":" . $name}[] = $value;    
+                    }
+                } else {
+                    $data->{$name} = $prop['value'];
+                }
+                $data->{":" . $name} = $type;
+            }
+        }
         
         $qb = $coll->createQueryBuilder()
                    ->field('parent')->equals($path)
@@ -529,6 +551,8 @@ class Client implements TransportInterface
         $path = $this->trimPath($path);
         $this->assertLoggedIn();
 
+        //TODO check if there is a node with a reference to this or a subnode of the path
+        /*
         $match = $path."%";
         $query = "SELECT node_identifier FROM jcrprops WHERE type = ? AND string_data LIKE ? AND workspace_id = ?";
         if ($ident = $this->conn->fetchColumn($query, array(\PHPCR\PropertyType::REFERENCE, $match, $this->workspaceId))) {
@@ -536,26 +560,27 @@ class Client implements TransportInterface
                 "Cannot delete item at path '".$path."', there is at least one item (ident ".$ident.") with ".
                 "a reference to this or a subnode of the path."
             );
-        }
+        }*/
 
         if (!$this->pathExists($path)) {
             throw new \PHPCR\ItemNotFoundException("No item found at ".$path);
         }
 
-        $this->conn->beginTransaction();
-
         try {
-            $query = "DELETE FROM jcrprops WHERE path LIKE ? AND workspace_id = ?";
-            $this->conn->executeUpdate($query, array($match, $this->workspaceId));
-
-            $query = "DELETE FROM jcrnodes WHERE path LIKE ? AND workspace_id = ?";
-            $this->conn->executeUpdate($query, array($match, $this->workspaceId));
-
-            $this->conn->commit();
-
-            return true;
+            
+            //TODO Soft Delete??
+            
+            $regex = new \MongoRegex('/^' . addcslashes($path, '/') . '/'); 
+            
+            $coll = $this->db->selectCollection('jcrnodes');
+            $qb = $coll->createQueryBuilder()
+                       ->remove()
+                       ->field('path')->equals($regex)
+                       ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $workspaceId));
+            $query = $qb->getQuery();
+        
+            return $query->execute();
         } catch(\Exception $e) {
-            $this->conn->rollBack();
             return false;
         }
     }
@@ -772,8 +797,8 @@ class Client implements TransportInterface
         
         // TODO validate types
         $data = array(
-            't'  => $type,
-            'v'  => $nativeValue
+            'type'  => $type,
+            'value'  => $nativeValue
         );
         
         $coll = $this->db->selectCollection('jcrnodes');

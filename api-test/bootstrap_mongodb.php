@@ -68,6 +68,23 @@ $node = array(
 $coll->insert($node);
 
 /**
+ * @return string classname of the repository factory
+ */
+function getRepositoryFactoryClass() {
+    return 'Jackalope\RepositoryFactoryMongoDB';
+}
+
+/**
+ * @return hashmap to be used with the repository factory
+ */
+function getRepositoryFactoryParameters($config) {
+    return array(
+        'jackalope.mongodb_server' => $config['doctrine.mongodb.server'],
+        'jackalope.mongodb_dbname' => $config['doctrine.mongodb.dbname'],
+    );
+}
+
+/**
  * Repository lookup is implementation specific.
  * @param config The configuration where to find the repository
  * @return the repository instance
@@ -75,7 +92,8 @@ $coll->insert($node);
 function getRepository($config) {
     global $dbConn, $db;
 
-    $transport = new \Jackalope\Transport\MongoDB\Client($dbConn, $db);
+    $factory = new \Jackalope\Factory();
+    $transport = $factory->get('Transport\MongoDB\Client', array($dbConn, $db));
     return new \Jackalope\Repository(null, null, $transport);
 }
 
