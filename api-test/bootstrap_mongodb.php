@@ -44,26 +44,26 @@ $dbConn = new \Doctrine\MongoDB\Connection($GLOBALS['jcr.doctrine.mongodb.server
 $db = $dbConn->selectDatabase($GLOBALS['jcr.doctrine.mongodb.dbname']);
 $db->drop();
 
-$coll = $db->selectCollection('jcrworkspaces');
+$coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_WORKSPACES);
 $workspace = array(
     'name' => 'default'
 );
 $coll->insert($workspace);
 
-$coll = $db->selectCollection('jcrworkspaces');
+$coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_WORKSPACES);
 $workspace = array(
-    '_id'  => new \MongoId('4e00e8fea381601b08000000'),
+    '_id' => new \MongoId('4e00e8fea381601b08000000'),
     'name' => $GLOBALS['jcr.workspace']
 );
 $coll->insert($workspace);
 
-$coll = $db->selectCollection('jcrnodes');
+$coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_NODES);
 $node = array(
     'path' => '/',
     'parent' => '-1',
-    'workspace_id' => MongoDBRef::create('jcrworkspaces', new \MongoId('4e00e8fea381601b08000000')),
+    'w_id' => new \MongoId('4e00e8fea381601b08000000'),
     'type' => 'nt:unstructured',
-    'properties' => new stdClass()
+    'props' => new stdClass()
 );
 $coll->insert($node);
 
@@ -78,9 +78,10 @@ function getRepositoryFactoryClass() {
  * @return hashmap to be used with the repository factory
  */
 function getRepositoryFactoryParameters($config) {
+    global $db;
+    
     return array(
-        'jackalope.mongodb_server' => $config['doctrine.mongodb.server'],
-        'jackalope.mongodb_dbname' => $config['doctrine.mongodb.dbname'],
+        'jackalope.mongodb_database' => $db
     );
 }
 
@@ -93,7 +94,7 @@ function getRepository($config) {
     global $dbConn, $db;
 
     $factory = new \Jackalope\Factory();
-    $transport = $factory->get('Transport\MongoDB\Client', array($dbConn, $db));
+    $transport = $factory->get('Transport\MongoDB\Client', array($db));
     return new \Jackalope\Repository(null, null, $transport);
 }
 
@@ -133,21 +134,19 @@ function getJCRSession($config, $credentials = null) {
 
 function getFixtureLoader($config)
 {
-    global $dbConn, $db;
-    return new MongoDbFixtureLoader($dbConn, $db, __DIR__ . "/fixtures/mongodb/");
+    return new MongoDbFixtureLoader($config['doctrine.mongodb.dbname'], __DIR__ . "/fixtures/mongodb/");
 }
 
 require_once "suite/inc/importexport.php";
 class MongoDbFixtureLoader implements phpcrApiTestSuiteImportExportFixtureInterface
 {
-    private $conn;
-    private $db;
+    
+    private $dbname;
     private $fixturePath;
 
-    public function __construct($conn, $db, $fixturePath)
+    public function __construct($dbname, $fixturePath)
     {
-        $this->conn = $conn;
-        $this->db = $db;
+        $this->dbname = $dbname;
         $this->fixturePath = $fixturePath;
     }
 
@@ -156,7 +155,7 @@ class MongoDbFixtureLoader implements phpcrApiTestSuiteImportExportFixtureInterf
         $file = $this->fixturePath . $file . ".json";
         
         //FIXME
-        exec('mongoimport --db jcrtests --collection jcrnodes --type json --file ' . $file . ' --jsonArray 2>&1', $out);
+        exec('mongoimport --db ' . $this->dbname . ' --collection ' . \Jackalope\Transport\MongoDB\Client::COLLNAME_NODES . ' --type json --file ' . $file . ' --jsonArray 2>&1', $out);
         
     }
 }

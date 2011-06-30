@@ -48,16 +48,6 @@ foreach ($ri AS $file) {
     $nodes = $srcDom->getElementsByTagNameNS('http://www.jcp.org/jcr/sv/1.0', 'node');
     $seenPaths = array();
     if ($nodes->length > 0) {
-        $id = new \MongoId();
-        // system-view
-        /*$dataSet[] = array(
-            '_id' => array('$oid' => $id->__toString()),
-            'path' => '/',
-            'parent' => '-1',
-            'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => array('$oid' => '4e00e8fea381601b08000000')),
-            'type' => 'nt:unstructured',
-            'properties' => new stdClass()
-        );*/
         
         foreach ($nodes AS $node) {
             /* @var $node DOMElement */
@@ -69,7 +59,6 @@ foreach ($ri AS $file) {
                 }
                 $parent = $parent->parentNode;
             } while ($parent instanceof DOMElement);
-            //$path = ltrim($path, '/');
 
             $attrs = array();
             foreach ($node->childNodes AS $child) {
@@ -81,25 +70,26 @@ foreach ($ri AS $file) {
                         $value[] = $nodeValue->nodeValue;
                     }
 
+                    $isMulti = (in_array($name, array('jcr:mixinTypes'))) || count($value) > 1;
                     $attrs[$name] = array(
                         'type' =>  strtolower($child->getAttributeNS('http://www.jcp.org/jcr/sv/1.0', 'type')),
-                        'value' => $value,
-                        'multiValued' => (in_array($name, array('jcr:mixinTypes'))) || count($value) > 1,
+                        'value' => ($isMulti) ? $value : current($value),
+                        'multi' => $isMulti,
                     );
                 }
             }
 
-            if (isset($attrs['jcr:uuid']['value'][0])) {
-                $id = (string) $attrs['jcr:uuid']['value'][0];
+            if (isset($attrs['jcr:uuid']['value'])) {
+                $id = (string) $attrs['jcr:uuid']['value'];
                 $id = new \MongoBinData($id, MongoBinData::UUID);
                 $id = array('$binary' => base64_encode($id->bin), '$type' => (string) sprintf('%02d', $id->type));
-                unset($attrs['jcr:uuid']['value'][0]);
+                unset($attrs['jcr:uuid']);
             }else{  
                 $id = new \MongoId;
                 $id = array('$oid' =>  $id->__toString());
             }
             
-            $type = $attrs['jcr:primaryType']['value'][0];
+            $type = $attrs['jcr:primaryType']['value'];
             unset($attrs['jcr:primaryType']);
             
             $parentPath = implode("/", array_slice(explode("/", $path), 0, -1));
@@ -109,23 +99,13 @@ foreach ($ri AS $file) {
                 '_id' => $id,
                 'path' => $path,
                 'parent' => $parentPath,
-                'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => array('$oid' => '4e00e8fea381601b08000000')),
+                'w_id' => array('$oid' => '4e00e8fea381601b08000000'),
                 'type' => $type,
-                'properties' => $attrs
+                'props' => $attrs
             );
         }
     } else {
-        $id = new \MongoId;
-        // document-view
-        /*$dataSet[] = array(
-            '_id' => array('$oid' => $id->__toString()),
-            'path' => '/',
-            'parent' => '-1',
-            'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => array('$oid' => '4e00e8fea381601b08000000')),
-            'type' => 'nt:unstructured',
-            'properties' => new stdClass()
-        );*/
-
+        
         $nodes = $srcDom->getElementsByTagName('*');
         foreach ($nodes AS $node) {
             if ($node instanceof DOMElement) {
@@ -135,7 +115,6 @@ foreach ($ri AS $file) {
                     $path = "/" . $parent->tagName . $path;
                     $parent = $parent->parentNode;
                 } while ($parent instanceof DOMElement);
-                //$path = ltrim($path, '/');
 
                 $attrs = array();
                 foreach ($node->attributes AS $attr) {
@@ -168,9 +147,9 @@ foreach ($ri AS $file) {
                         '_id' => $id,
                         'path' => $path,
                         'parent' => $parentPath,
-                        'workspace_id' => array('$ref' => 'jcrworkspaces', '$id' => array('$oid' => '4e00e8fea381601b08000000')),
+                        'w_id' => array('$oid' => '4e00e8fea381601b08000000'),
                         'type' => 'nt:unstructured',
-                        'properties' => $attrs
+                        'props' => $attrs
                     );
                     $seenPaths[$path] = $id;
                 } else {

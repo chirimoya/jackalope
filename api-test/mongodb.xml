@@ -17,7 +17,7 @@
         <var name="jcr.doctrine.commondir" value="/var/data/libraries/mongodb/lib/vendor/doctrine-common/lib" />
         <var name="jcr.doctrine.mongodbdir" value="/var/data/libraries/mongodb/lib" />
         <var name="jcr.doctrine.mongodb.server" value="mongodb://localhost" />
-        <var name="jcr.doctrine.mongodb.dbname" value="jcrtests" />
+        <var name="jcr.doctrine.mongodb.dbname" value="phpcr_tests" />
     </php>
 
    <testsuites>

@@ -37,10 +37,27 @@ use Doctrine\MongoDb\Database;
  */
 class Client implements TransportInterface
 {
+    
     /**
-     * @var Doctrine\MongoDB\Connection
+     * Name of MongoDB workspace collection.
+     * 
+     * @var string
      */
-    private $conn;
+    const COLLNAME_WORKSPACES = 'phpcr_workspaces';
+    
+    /**
+     * Name of MongoDB namespace collection.
+     * 
+     * @var string
+     */
+    const COLLNAME_NAMESPACES = 'phpcr_namespaces';
+    
+    /**
+     * Name of MongoDB node collection.
+     * 
+     * @var string
+     */
+    const COLLNAME_NODES = 'phpcr_nodes';
     
     /**
      * @var Doctrine\MongoDB\Database
@@ -78,12 +95,6 @@ class Client implements TransportInterface
     );
 
     /**
-     * @var array
-     */
-    private $nodeIdentifiers = array();
-
-    /**
-     *
      * @var PHPCR\NodeType\NodeTypeManagerInterface
      */
     private $nodeTypeManager = null;
@@ -108,22 +119,12 @@ class Client implements TransportInterface
      * Create a transport pointing to a server url.
      *
      * @param object $factory  an object factory implementing "get" as described in \Jackalope\Factory.
-     * @param Doctrine\MongoDB\Connection $conn
      * @param Doctrine\MongoDB\Database $db
      */
-    public function __construct($factory, Connection $conn, Database $db)
+    public function __construct($factory, Database $db)
     {
         $this->factory = $factory;
-        $this->conn = $conn;
         $this->db = $db;
-    }
-
-    /**
-     * @return Doctrine\MongoDB\Connection
-     */
-    public function getConnection()
-    {
-        return $this->conn;
     }
 
     /**
@@ -138,13 +139,13 @@ class Client implements TransportInterface
         if ($workspaceId !== false) {
             throw new \PHPCR\RepositoryException("Workspace '" . $workspaceName . "' already exists");
         }
-        $this->conn->insert('jcrworkspaces', array('name' => $workspaceName));
+        $this->conn->insert(self::COLLNAME_WORKSPACES, array('name' => $workspaceName));
         $workspaceId = $this->conn->lastInsertId();
 
-        $this->conn->insert("jcrnodes", array(
+        $this->conn->insert(self::COLLNAME_NODES, array(
             'path' => '',
             'parent' => '-1',
-            'workspace_id' => $workspaceId,
+            'w_id' => $workspaceId,
             'identifier' => Helper::generateUUID(),
             'type' => 'nt:unstructured',
         ));
@@ -187,9 +188,15 @@ class Client implements TransportInterface
         $this->loggedIn = false;
     }
 
+    /**
+     * Get workspace Id.
+     * 
+     * @param string $workspaceName
+     * @return string|bool
+     */
     private function getWorkspaceId($workspaceName)
     {
-        $coll = $this->db->selectCollection('jcrworkspaces');
+        $coll = $this->db->selectCollection(self::COLLNAME_WORKSPACES);
         
         $qb = $coll->createQueryBuilder()
                    ->field('name')->equals($workspaceName);
@@ -200,6 +207,13 @@ class Client implements TransportInterface
         return ($workspace != null) ? $workspace['_id'] : false;
     }
 
+    /**
+     * Assert logged in.
+     * 
+     * @return void
+     * 
+     * @throws \PHPCR\RepositoryException if not logged in 
+     */
     private function assertLoggedIn()
     {
         if (!$this->loggedIn) {
@@ -212,24 +226,25 @@ class Client implements TransportInterface
      * This happens without login or accessing a specific workspace.
      *
      * @return Array with name => Value for the descriptors
+     * 
      * @throws \PHPCR\RepositoryException if error occurs
      */
     public function getRepositoryDescriptors()
     {
-        return array();
+        return array(); //TODO
     }
 
     /**
      * Get the registered namespaces mappings from the backend.
      *
      * @return array Associative array of prefix => uri
-     *
+     * 
      * @throws \PHPCR\RepositoryException if now logged in
      */
     public function getNamespaces()
     {
         if ($this->userNamespaces === null) {
-            $coll = $this->db->selectCollection('jcrnamespaces');
+            $coll = $this->db->selectCollection(self::COLLNAME_NAMESPACES);
             
             $namespaces = $coll->find();
             $this->userNamespaces = array();
@@ -249,6 +264,11 @@ class Client implements TransportInterface
      * @param   string  $dstAbsPath     Absolute destination path (must include the new node name)
      * @param   string  $srcWorkspace   The source workspace where the node can be found or NULL for current
      * @return void
+     * 
+     * @throws \PHPCR\NoSuchWorkspaceException if source workspace doesn't exist
+     * @throws \PHPCR\RepositoryException if destination path is invalid
+     * @throws \PHPCR\PathNotFoundException if source path is not found
+     * @throws \PHPCR\ItemExistsException if destination path already exists
      *
      * @link http://www.ietf.org/rfc/rfc2518.txt
      * @see \Jackalope\Workspace::copy
@@ -257,8 +277,8 @@ class Client implements TransportInterface
     {
         $this->assertLoggedIn();
         
-        $srcAbsPath = $this->trimPath($srcAbsPath);
-        $dstAbsPath = $this->trimPath($dstAbsPath);
+        $srcAbsPath = $this->validatePath($srcAbsPath);
+        $dstAbsPath = $this->validatePath($dstAbsPath);
 
         $workspaceId = $this->workspaceId;
         if (null !== $srcWorkspace) {
@@ -289,10 +309,10 @@ class Client implements TransportInterface
 
             $regex = new \MongoRegex('/^' . addcslashes($srcAbsPath, '/') . '/'); 
             
-            $coll = $this->db->selectCollection('jcrnodes');
+            $coll = $this->db->selectCollection(self::COLLNAME_NODES);
             $qb = $coll->createQueryBuilder()
                        ->field('path')->equals($regex)
-                       ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $workspaceId));
+                       ->field('w_id')->equals($workspaceId);
     
             $query = $qb->getQuery();
             $nodes = $query->getIterator();
@@ -304,7 +324,7 @@ class Client implements TransportInterface
                 $node['_id'] = new \MongoBinData($uuid, \MongoBinData::UUID);
                 $node['path'] = $newPath;
                 $node['parent'] = $this->getParentPath($newPath);
-                $node['workspace_id'] = \MongoDBRef::create('jcrworkspaces', $this->workspaceId);
+                $node['w_id'] = $this->workspaceId;
                 
                 $coll->insert($node);
             }
@@ -321,7 +341,7 @@ class Client implements TransportInterface
      */
     public function getAccessibleWorkspaceNames()
     {
-        $coll = $this->db->selectCollection('jcrworkspaces');
+        $coll = $this->db->selectCollection(self::COLLNAME_WORKSPACES);
         
         $workspaces = $coll->find();
         
@@ -394,12 +414,12 @@ class Client implements TransportInterface
     public function getNode($path)
     {
         $this->assertLoggedIn();
-        $path = $this->trimPath($path);
+        $path = $this->validatePath($path);
         
-        $coll = $this->db->selectCollection('jcrnodes');
+        $coll = $this->db->selectCollection(self::COLLNAME_NODES);
         $qb = $coll->createQueryBuilder()
                    ->field('path')->equals($path)
-                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId));
+                   ->field('w_id')->equals($this->workspaceId);
 
         $query = $qb->getQuery();
         $node = $query->getSingleResult();
@@ -414,24 +434,35 @@ class Client implements TransportInterface
             $data->{'jcr:uuid'} = $node['_id']->bin;
         }
         $data->{'jcr:primaryType'} = $node['type'];
-        $this->nodeIdentifiers[$path] = $node['_id'];
         
-        //TODO prepare properties
-        foreach ($node['properties'] as $name => $prop) {
+        //TODO prepare properties?
+        foreach ($node['props'] as $name => $prop) {
             $type = $prop['type'];
             
             if ($type == \PHPCR\PropertyType::TYPENAME_BINARY) {
-                if (isset($prop['multiValued']) && $prop['multiValued'] == true) {
+                if (isset($prop['multi']) && $prop['multi'] == true) {
                     foreach ($prop['value'] as $value) {
-                        $data->{":" . $name}[] = 0; //FIXME
+                        $data->{":" . $name}[] = $value;
                     }
                 } else {
-                    $data->{":" . $name} = 0; //FIXME
+                    $data->{":" . $name} = $prop['value'];
                 }
-            } else {
-                if (isset($prop['multiValued']) && $prop['multiValued'] == true) {
+            } else if ($type == \PHPCR\PropertyType::TYPENAME_DATE) {
+                if (isset($prop['multi']) && $prop['multi'] == true) {
                     foreach ($prop['value'] as $value) {
-                        $data->{":" . $name}[] = $value;    
+                        $date = new \DateTime(date('Y-m-d H:i:s', $value['date']->sec), new \DateTimeZone($value['timezone']));
+                        $data->{$name}[] = $date->format('c');
+                    }
+                } else {
+                    $date = new \DateTime(date('Y-m-d H:i:s', $prop['value']['date']->sec), new \DateTimeZone($prop['value']['timezone']));
+                    $data->{$name} = $date->format('c');
+                }
+                
+                $data->{":" . $name} = $type;
+            } else {
+                if (isset($prop['multi']) && $prop['multi'] == true) {
+                    foreach ($prop['value'] as $value) {
+                        $data->{$name}[] = $value;    
                     }
                 } else {
                     $data->{$name} = $prop['value'];
@@ -442,7 +473,7 @@ class Client implements TransportInterface
         
         $qb = $coll->createQueryBuilder()
                    ->field('parent')->equals($path)
-                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId));
+                   ->field('w_id')->equals($this->workspaceId);
 
         $query = $qb->getQuery();
         $children = $query->getIterator();
@@ -477,7 +508,6 @@ class Client implements TransportInterface
 
         return $nodes;
     }
-
 
     /**
      * Check-in item at path.
@@ -522,13 +552,19 @@ class Client implements TransportInterface
         throw new \Jackalope\NotImplementedException();
     }
 
+    /**
+     * Checks if path exists.
+     * 
+     * @param string $path
+     * @return bool
+     */
     private function pathExists($path)
     {
-        $coll = $this->db->selectCollection('jcrnodes');
+        $coll = $this->db->selectCollection(self::COLLNAME_NODES);
         
         $qb = $coll->createQueryBuilder()
                    ->field('path')->equals($path)
-                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId));
+                   ->field('w_id')->equals($this->workspaceId);
         
         $query = $qb->getQuery();
         
@@ -548,13 +584,13 @@ class Client implements TransportInterface
      */
     public function deleteNode($path)
     {
-        $path = $this->trimPath($path);
+        $path = $this->validatePath($path);
         $this->assertLoggedIn();
 
         //TODO check if there is a node with a reference to this or a subnode of the path
         /*
         $match = $path."%";
-        $query = "SELECT node_identifier FROM jcrprops WHERE type = ? AND string_data LIKE ? AND workspace_id = ?";
+        $query = "SELECT node_identifier FROM jcrprops WHERE type = ? AND string_data LIKE ? AND w_id = ?";
         if ($ident = $this->conn->fetchColumn($query, array(\PHPCR\PropertyType::REFERENCE, $match, $this->workspaceId))) {
             throw new \PHPCR\ReferentialIntegrityException(
                 "Cannot delete item at path '".$path."', there is at least one item (ident ".$ident.") with ".
@@ -572,11 +608,11 @@ class Client implements TransportInterface
             
             $regex = new \MongoRegex('/^' . addcslashes($path, '/') . '/'); 
             
-            $coll = $this->db->selectCollection('jcrnodes');
+            $coll = $this->db->selectCollection(self::COLLNAME_NODES);
             $qb = $coll->createQueryBuilder()
                        ->remove()
                        ->field('path')->equals($regex)
-                       ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $workspaceId));
+                       ->field('w_id')->equals($workspaceId);
             $query = $qb->getQuery();
         
             return $query->execute();
@@ -595,10 +631,10 @@ class Client implements TransportInterface
      */
     public function deleteProperty($path)
     {
-        $path = $this->trimPath($path);
+        $path = $this->validatePath($path);
         $this->assertLoggedIn();
 
-        $query = "DELETE FROM jcrprops WHERE path = ? AND workspace_id = ?";
+        $query = "DELETE FROM jcrprops WHERE path = ? AND w_id = ?";
         $this->conn->executeUpdate($query, array($path, $this->workspaceId));
 
         return true;
@@ -699,10 +735,10 @@ class Client implements TransportInterface
      */
     public function storeNode(\PHPCR\NodeInterface $node)
     {
-        $path = $node->getPath();
-        $path = $this->trimPath($path);
         $this->assertLoggedIn();
         
+        $path = $node->getPath();
+        $path = $this->validatePath($path);
         
         // getting the property definitions is a copy of the DoctrineDBAL 
         // implementation - maybe there is a better way?
@@ -740,28 +776,35 @@ class Client implements TransportInterface
         try {
             $nodeIdentifier = (isset($properties['jcr:uuid'])) ? $properties['jcr:uuid']->getNativeValue() :  UUIDHelper::generateUUID();
             
-            // TODO prepare properties
-            /*
+            $props = array();
             foreach ($properties AS $property) {
-                $this->doStoreProperty($property, $popertyDefs);
-            }*/
-            
-            $coll = $this->db->selectCollection('jcrnodes');
-            if (!$this->pathExists($path)) {
-                $data = array(
-                    '_id'           => new \MongoBinData($nodeIdentifier, \MongoBinData::UUID),
-                    'path'          => $path,
-                    'parent'        => $this->getParentPath($path),
-                    'workspace_id'  => \MongoDBRef::create('jcrworkspaces', $this->workspaceId),
-                    'type'          => isset($properties['jcr:primaryType']) ? $properties['jcr:primaryType']->getValue() : 'nt:unstructured',
-                    'properties'    => new \stdClass()
-                );
-                $coll->insert($data);
-            }else{
-                
+                $data = $this->decodeProperty($property, $popertyDefs);
+                if (!empty($data)) {
+                    $props[$property->getName()] = $data;  
+                }
             }
             
-            $this->nodeIdentifiers[$path] = $nodeIdentifier;
+            $data = array(
+                '_id' => new \MongoBinData($nodeIdentifier, \MongoBinData::UUID),
+                'path' => $path,
+                'parent' => $this->getParentPath($path),
+                'w_id'  => $this->workspaceId,
+                'type' => isset($properties['jcr:primaryType']) ? $properties['jcr:primaryType']->getValue() : 'nt:unstructured',
+                'props' => $props
+            );
+            
+            $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+            if (!$this->pathExists($path)) {
+                $coll->insert($data);
+            }else{
+                $qb = $coll->createQueryBuilder()
+                           ->update()
+                           ->setNewObj($data)
+                           ->field('path')->equals($path)
+                           ->field('w_id')->equals($this->workspaceId);
+                $query = $qb->getQuery();
+                $query->execute();  //FIXME use _id for update?
+            }
             
             if ($node->hasNodes()) {
                 // TODO save all chiles?
@@ -785,71 +828,64 @@ class Client implements TransportInterface
      */
     public function storeProperty(\PHPCR\PropertyInterface $property)
     {   
+        $this->assertLoggedIn();
+        
         $path = $property->getPath();
-        $path = $this->trimPath($path);
+        $path = $this->validatePath($path);
         
         $parent = $property->getParent();
-        $parentPath = $this->trimPath($parent->getPath());
-
-        $typeId = $property->getType();
-        $type = PropertyType::nameFromValue($typeId);
-        $nativeValue = $property->getValueForStorage();
+        $parentPath = $this->validatePath($parent->getPath());
         
-        // TODO validate types
-        $data = array(
-            'type'  => $type,
-            'value'  => $nativeValue
-        );
+        try {
         
-        $coll = $this->db->selectCollection('jcrnodes');
+            $data = $this->decodeProperty($property);
+        
+        } catch(\Exception $e) {
+            //echo $path . "\n";
+            //echo $e->getMessage() . "\n";
+            //echo $e->getTraceAsString() . "\n";
+            //exit();
+        }
+        
+        $coll = $this->db->selectCollection(self::COLLNAME_NODES);
         $qb = $coll->createQueryBuilder()
                    ->update()
                    ->upsert()
-                   ->field('properties.' . $property->getName())->set($data)
+                   ->field('props.' . $property->getName())->set($data)
                    ->field('path')->equals($parentPath)
-                   ->field('workspace_id')->equals(array('$ref' => 'jcrworkspaces', '$id' => $this->workspaceId));
+                   ->field('w_id')->equals($this->workspaceId);
         $query = $qb->getQuery();
         
         return $query->execute();
-        
-        //return $this->doStoreProperty($property, array());
     }
-
+    
     /**
-     * @param \PHPCR\PropertyInterface $property
-     * @param array $propDefinitions
-     * @return bool
+     * "Decode" PHPCR property to MongoDB property
+     * 
+     * @param $property
+     * @param $propDefinitions
+     * @return array|null
      */
-    private function doStoreProperty(\PHPCR\PropertyInterface $property, $propDefinitions = array())
+    private function decodeProperty(\PHPCR\PropertyInterface $property, $propDefinitions = array())
     {
         $path = $property->getPath();
-        $path = $this->trimPath($path);
+        $path = $this->validatePath($path);
         $name = explode("/", $path);
         $name = end($name);
-        // TODO: Upsert
-        /* @var $property \PHPCR\PropertyInterface */
-        $idx = 0;
-
+        
         if ($name == "jcr:uuid" || $name == "jcr:primaryType") {
-            return;
+            return null;
         }
 
         if (!$property->isModified() && !$property->isNew()) {
-            return;
+            return null;
         }
-
-        $this->assertLoggedIn();
-
+        
         if (($property->getType() == PropertyType::REFERENCE || $property->getType() == PropertyType::WEAKREFERENCE) &&
             !$property->getNode()->isNodeType('mix:referenceable')) {
             throw new \PHPCR\ValueFormatException('Node ' . $property->getNode()->getPath() . ' is not referencable');
         }
-
-        $this->conn->delete('jcrprops', array(
-            'path' => $path,
-            'workspace_id' => $this->workspaceId,
-        ));
-
+         
         $isMultiple = $property->isMultiple();
         if (isset($propDefinitions[$name])) {
             /* @var $propertyDef \PHPCR\NodeType\PropertyDefinitionInterface */
@@ -875,43 +911,36 @@ class Client implements TransportInterface
         }
         
         $data = array(
-            'path'              => $path,
-            'workspace_id'      => $this->workspaceId,
-            'name'              => $name,
-            'idx'               => 0,
-            'multi_valued'      => $isMultiple ? 1 : 0,
-            'node_identifier'   => $this->nodeIdentifiers[$this->trimPath($property->getParent()->getPath(), '/')]
+            'multi' => $isMultiple,
         );
-        $data['type'] = $property->getType();
+        
+        $typeId = $property->getType();
+        $type = PropertyType::nameFromValue($typeId);
+        
+        $data['type'] = $type;
 
         $binaryData = null;
-        switch ($data['type']) {
+        switch ($typeId) {
             case \PHPCR\PropertyType::NAME:
             case \PHPCR\PropertyType::URI:
             case \PHPCR\PropertyType::WEAKREFERENCE:
             case \PHPCR\PropertyType::REFERENCE:
             case \PHPCR\PropertyType::PATH:
-                $dataFieldName = 'string_data';
                 $values = $property->getString();
                 break;
             case \PHPCR\PropertyType::DECIMAL:
-                $dataFieldName = 'string_data';
                 $values = $property->getDecimal();
                 break;
             case \PHPCR\PropertyType::STRING:
-                $dataFieldName = 'clob_data';
                 $values = $property->getString();
                 break;
             case \PHPCR\PropertyType::BOOLEAN:
-                $dataFieldName = 'int_data';
-                $values = $property->getBoolean() ? 1 : 0;
+                $values = $property->getBoolean();
                 break;
             case \PHPCR\PropertyType::LONG:
-                $dataFieldName = 'int_data';
                 $values = $property->getLong();
                 break;
             case \PHPCR\PropertyType::BINARY:
-                $dataFieldName = 'int_data';
                 if ($property->isMultiple()) {
                     foreach ((array)$property->getBinary() AS $binary) {
                         $binary = stream_get_contents($binary);
@@ -925,40 +954,61 @@ class Client implements TransportInterface
                 }
                 break;
             case \PHPCR\PropertyType::DATE:
-                $dataFieldName = 'datetime_data';
-                $date = $property->getDate() ?: new \DateTime("now");
-                $values = $date->format($this->conn->getDatabasePlatform()->getDateTimeFormatString());
+                if ($property->isMultiple()) {
+                    $dates = $property->getDate() ?: new \DateTime('now');
+                    foreach ((array)$dates AS $date) {
+                        $value = array(
+                            'date' => new \MongoDate($date->getTimestamp()), 
+                            'timezone' => $date->getTimezone()->getName()
+                        );
+                        $values[] = $value;
+                    }
+                } else {
+                    $date = $property->getDate() ?: new \DateTime('now');
+                    $values = array(
+                        'date' => new \MongoDate($date->getTimestamp()), 
+                        'timezone' => $date->getTimezone()->getName()
+                    );
+                }
                 break;
             case \PHPCR\PropertyType::DOUBLE:
-                $dataFieldName = 'float_data';
                 $values = $property->getDouble();
                 break;
         }
 
         if ($isMultiple) {
+            $data['value'] = array();
             foreach ((array)$values AS $value) {
                 $this->assertValidPropertyValue($data['type'], $value, $path);
 
-                $data[$dataFieldName] = $value;
-                $data['idx'] = $idx++;
-                $this->conn->insert('jcrprops', $data);
+                $data['value'][] = $value;
             }
         } else {
             $this->assertValidPropertyValue($data['type'], $values, $path);
 
-            $data[$dataFieldName] = $values;
-            $this->conn->insert('jcrprops', $data);
+            $data['value'] = $values;
         }
-
+        
+        
         if ($binaryData) {
-            foreach ($binaryData AS $idx => $data)
-            $this->conn->insert('jcrbinarydata', array(
-                'path'          => $path,
-                'workspace_id'  => $this->workspaceId,
-                'idx'           => $idx,
-                'data'          => $data,
-            ));
+            
+            try {    
+                foreach ($binaryData AS $idx => $binary) {
+                    $grid = $this->db->getGridFS();
+                    $grid->getMongoCollection()->storeBytes($binary, array(
+                        'path' => $path,
+                        'w_id' => $this->workspaceId,
+                        'idx'  => $idx
+                    ));
+                    
+                }
+                
+            } catch (\Exception $e) {
+                throw $e;
+            }
         }
+        
+        return $data;
     }
 
     /**
@@ -967,8 +1017,9 @@ class Client implements TransportInterface
      * @param int $type
      * @param mixed $value
      * @param string $path
-     * @throws \PHPCR\ValueFormatException
      * @return void
+     * 
+     * @throws \PHPCR\ValueFormatException
      */
     private function assertValidPropertyValue($type, $value, $path)
     {
@@ -1021,12 +1072,20 @@ $/xi";
     public function getNodePathForIdentifier($uuid)
     {
         $this->assertLoggedIn();
-
-        $path = $this->conn->fetchColumn("SELECT path FROM jcrnodes WHERE identifier = ? AND workspace_id = ?", array($uuid, $this->workspaceId));
-        if (!$path) {
+        
+        $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+        
+        $qb = $coll->createQueryBuilder()
+                   ->field('_id')->equals(new \MongoBinData($uuid, \MongoBinData::UUID))
+                   ->field('w_id')->equals($this->workspaceId);
+        
+        $query = $qb->getQuery();
+        $node = $query->getSingleResult();
+        
+        if (empty($node)) {
             throw new \PHPCR\ItemNotFoundException("no item found with uuid ".$uuid);
         }
-        return "/" . $path;
+        return $node['path'];
     }
 
     /**
@@ -1093,9 +1152,22 @@ $/xi";
         throw new \Jackalope\NotImplementedException("Not implemented yet");
     }
 
+    /**
+     * Register a new namespace.
+     *
+     * Validation based on what was returned from getNamespaces has already
+     * happened in the NamespaceRegistry.
+     *
+     * The transport is however responsible of removing an existing prefix for
+     * that uri, if one exists. As well as removing the current uri mapped to
+     * this prefix if this prefix is already existing.
+     *
+     * @param string $prefix The prefix to be mapped.
+     * @param string $uri The URI to be mapped.
+     */
     public function registerNamespace($prefix, $uri)
     {
-        $coll = $this->db->selectCollection('jcrnamespaces');
+        $coll = $this->db->selectCollection(self::COLLNAME_NAMESPACES);
         $namespace = array(
             'prefix' => $prefix,
             'uri' => $uri,
@@ -1103,9 +1175,17 @@ $/xi";
         $coll->insert($namespace);
     }
 
+    /**
+     * Unregister an existing namespace.
+     *
+     * Validation based on what was returned from getNamespaces has already
+     * happened in the NamespaceRegistry.
+     *
+     * @param string $prefix The prefix to unregister.
+     */
     public function unregisterNamespace($prefix)
     {
-        $coll = $this->db->selectCollection('jcrnamespaces');
+        $coll = $this->db->selectCollection(self::COLLNAME_NAMESPACES);
         $qb = $coll->createQueryBuilder()
                    ->field('prefix')->equals($prefix);
         
@@ -1147,11 +1227,11 @@ $/xi";
      */
     protected function getNodeReferences($path, $name = null, $weak_reference = false)
     {
-        $path = $this->trimPath($path);
+        $path = $this->validatePath($path);
         $type = $weak_reference ? \PHPCR\PropertyType::WEAKREFERENCE : \PHPCR\PropertyType::REFERENCE;
 
         $sql = "SELECT p.path, p.name FROM jcrprops p " .
-               "INNER JOIN jcrnodes r ON r.identifier = p.string_data AND p.workspace_id = ? AND r.workspace_id = ?" .
+               "INNER JOIN jcrnodes r ON r.identifier = p.string_data AND p.w_id = ? AND r.w_id = ?" .
                "WHERE r.path = ? AND p.type = ?";
         $properties = $this->conn->fetchAll($sql, array($this->workspaceId, $this->workspaceId, $path, $type));
 
@@ -1178,16 +1258,30 @@ $/xi";
             \PHPCR\SessionInterface::ACTION_ADD_NODE,
             \PHPCR\SessionInterface::ACTION_READ,
             \PHPCR\SessionInterface::ACTION_REMOVE,
-            \PHPCR\SessionInterface::ACTION_SET_PROPERTY);
+            \PHPCR\SessionInterface::ACTION_SET_PROPERTY
+        );
     }
-
-    protected function trimPath($path)
+    
+    /**
+     * Validate path.
+     * 
+     * @param $path
+     * @return string
+     */
+    protected function validatePath($path)
     {
         $this->ensureValidPath($path);
-
-        return $path; // ltrim($path, "/");
+        
+        return $path; 
     }
 
+    /**
+     * Ensure path is valid.
+     * 
+     * @param $path
+     * 
+     * @throws \PHPCR\RepositoryException if path is not well-formed or contains invalid characters 
+     */
     protected function ensureValidPath($path)
     {
         if (! (strpos($path, '//') === false

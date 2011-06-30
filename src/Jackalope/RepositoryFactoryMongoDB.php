@@ -19,8 +19,7 @@ use PHPCR\RepositoryFactoryInterface;
 class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
 {
     private $required = array(
-        'jackalope.jackrabbit_server' => 'string (required): Path to the MongoDB server',
-        'jackalope.jackrabbit_dbname' => 'string (required): Database name',
+        'jackalope.mongodb_database' => '\Doctrine\MongoDB\Database (required): mongodb database instance',
     );
     private $optional = array(
         'jackalope.factory' => 'string or object: Use a custom factory class for Jackalope objects',
@@ -53,10 +52,9 @@ class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
             $factory = new Factory();
         }
 
-        $dbConn = new \Doctrine\MongoDB\Connection($parameters['jackalope.mongodb_server']);
-        $db = $dbConn->selectDatabase($parameters['jackalope.mongodb_dbname']);
+        $db = $parameters['jackalope.mongodb_database'];
 
-        $transport = $factory->get('Transport\MongoDB\Client', array($dbConn, $db));
+        $transport = $factory->get('Transport\MongoDB\Client', array($db));
        
         return new Repository($factory, null, $transport);
     }
