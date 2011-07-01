@@ -343,6 +343,34 @@ class Client implements TransportInterface
     }
 
     /**
+     * Creates a new Workspace with the specified name. The new workspace is
+     * empty, meaning it contains only root node.
+     *
+     * If srcWorkspace is given:
+     * Creates a new Workspace with the specified name initialized with a
+     * clone of the content of the workspace srcWorkspace. Semantically,
+     * this method is equivalent to creating a new workspace and manually
+     * cloning srcWorkspace to it; however, this method may assist some
+     * implementations in optimizing subsequent Node.update and Node.merge
+     * calls between the new workspace and its source.
+     *
+     * The new workspace can be accessed through a login specifying its name.
+     *
+     * @param string $name A String, the name of the new workspace.
+     * @param string $srcWorkspace The name of the workspace from which the new workspace is to be cloned.
+     * @return void
+     * @throws \PHPCR\AccessDeniedException if the session through which this Workspace object was acquired does not have sufficient access to create the new workspace.
+     * @throws \PHPCR\UnsupportedRepositoryOperationException if the repository does not support the creation of workspaces.
+     * @throws \PHPCR\NoSuchWorkspaceException if $srcWorkspace does not exist.
+     * @throws \PHPCR\RepositoryException if another error occurs.
+     * @api
+     */
+    public function createWorkspace($name, $srcWorkspace = null)
+    {
+        throw new \Jackalope\NotImplementedException();
+    }
+
+    /**
      * Returns the accessible workspace names
      *
      * @return array Set of workspaces to work on.
@@ -395,16 +423,38 @@ class Client implements TransportInterface
      */
     public function getNodes($paths)
     {
-        foreach ($paths as $key => $path) {
-            $paths[$key] = $this->encodePathForDavex($path);
-            $paths[$key] .= '.0.json';
+        if (count($paths) == 0) {
+            return array();
         }
+        $url = array_shift($paths);
 
-        $request = $this->getRequest(Request::GET, $paths);
+        if (count($paths) == 0) {
+            try {
+                return array($url => $this->getNode($url));
+            } catch (\PHPCR\ItemNotFoundException $e) {
+                return array();
+            }
+        }
+        $body = array();
+        
+        $url = $this->encodePathForDavex($url).".0.json";
+        foreach ($paths as $path) {
+            $body[] = http_build_query(array(":get"=>$path));
+        }
+        $body = implode("&",$body);
+        $request = $this->getRequest(Request::POST, $url);
+        $request->setBody($body);
+        $request->setContentType('application/x-www-form-urlencoded');
         try {
-            return $request->executeJson(true);
+            $data = $request->executeJson();
+            return $data->nodes;
         } catch (\PHPCR\PathNotFoundException $e) {
             throw new \PHPCR\ItemNotFoundException($e->getMessage(), $e->getCode(), $e);
+        } catch (\PHPCR\RepositoryException $e) {
+            if ($e->getMessage() == 'HTTP 403: Prefix must not be empty (org.apache.jackrabbit.spi.commons.conversion.IllegalNameException)') {
+                throw new \PHPCR\UnsupportedRepositoryOperationException("Jackalope currently needs a patched jackrabbit for Session->getNodes() to work. Until our patches make it into the official distribution, see https://github.com/jackalope/jackrabbit/blob/2.2-jackalope/README.jackalope.patches.md for details and downloads."); 
+            } 
+            throw $e;
         }
     }
 
@@ -701,7 +751,7 @@ class Client implements TransportInterface
      */
     public function deleteProperty($path)
     {
-        return $this->deleteItem($path);
+        return $this->deleteNode($path);
     }
 
     /**
