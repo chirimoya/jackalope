@@ -12,7 +12,7 @@ if (method_exists('PHPUnit_Util_Filter', 'addDirectoryToFilter')) {
  * This file does some basic stuff that's project specific.
  *
  * function getRepository(config) which returns the repository
- * function getJCRSession(config) which returns the session
+ * function getPHPCRSession(config) which returns the session
  *
  * TODO: remove the following once it has been moved to a base file
  * function getSimpleCredentials(user, password) which returns simpleCredentials
@@ -21,27 +21,27 @@ if (method_exists('PHPUnit_Util_Filter', 'addDirectoryToFilter')) {
  */
 
 // Make sure we have the necessary config
-$necessaryConfigValues = array('jcr.doctrine.loader', 'jcr.doctrine.commondir', 'jcr.doctrine.mongodbdir');
+$necessaryConfigValues = array('phpcr.workspace', 'phpcr.transport', 'phpcr.doctrine.loader', 'phpcr.doctrine.commondir', 'phpcr.doctrine.mongodbdir');
 foreach ($necessaryConfigValues as $val) {
     if (empty($GLOBALS[$val])) {
         die('Please set '.$val.' in your phpunit.xml.' . "\n");
     }
 }
 
-require_once($GLOBALS['jcr.doctrine.loader']);
+require_once($GLOBALS['phpcr.doctrine.loader']);
 
-$loader = new \Doctrine\Common\ClassLoader("Doctrine\Common", $GLOBALS['jcr.doctrine.commondir']);
+$loader = new \Doctrine\Common\ClassLoader("Doctrine\Common", $GLOBALS['phpcr.doctrine.commondir']);
 $loader->register();
 
-$loader = new \Doctrine\Common\ClassLoader("Doctrine\MongoDB", $GLOBALS['jcr.doctrine.mongodbdir']);
+$loader = new \Doctrine\Common\ClassLoader("Doctrine\MongoDB", $GLOBALS['phpcr.doctrine.mongodbdir']);
 $loader->register();
 
 /** autoloader: jackalope-api-tests relies on an autoloader.
  */
 require_once(dirname(__FILE__) . '/../src/Jackalope/autoloader.php');
 
-$dbConn = new \Doctrine\MongoDB\Connection($GLOBALS['jcr.doctrine.mongodb.server']);
-$db = $dbConn->selectDatabase($GLOBALS['jcr.doctrine.mongodb.dbname']);
+$dbConn = new \Doctrine\MongoDB\Connection($GLOBALS['phpcr.doctrine.mongodb.server']);
+$db = $dbConn->selectDatabase($GLOBALS['phpcr.doctrine.mongodb.dbname']);
 $db->drop();
 
 $coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_WORKSPACES);
@@ -53,7 +53,7 @@ $coll->insert($workspace);
 $coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_WORKSPACES);
 $workspace = array(
     '_id' => new \MongoId('4e00e8fea381601b08000000'),
-    'name' => $GLOBALS['jcr.workspace']
+    'name' => $GLOBALS['phpcr.workspace']
 );
 $coll->insert($workspace);
 
@@ -91,10 +91,16 @@ function getRepositoryFactoryParameters($config) {
  * @return the repository instance
  */
 function getRepository($config) {
-    global $dbConn, $db;
+    global $db;
+    
+    if (!$db instanceof \Doctrine\MongoDB\Database || empty($config['transport'])) {
+        return false;
+    }
+    if ($config['transport'] != 'mongodb') {
+        throw new Exception("Don't know how to handle transport other than mongodb. (".$config['transport'].')');
+    }
 
-    $factory = new \Jackalope\Factory();
-    $transport = $factory->get('Transport\MongoDB\Client', array($db));
+    $transport = new \Jackalope\Transport\MongoDB\Client(new \Jackalope\Factory, $db);
     return new \Jackalope\Repository(null, null, $transport);
 }
 
@@ -113,7 +119,7 @@ function getSimpleCredentials($user, $password) {
  * @param credentials The credentials to log into the repository. If omitted, $config['user'] and $config['pass'] is used with getSimpleCredentials
  * @return A session resulting from logging into the repository found at the $config path
  */
-function getJCRSession($config, $credentials = null) {
+function getPHPCRSession($config, $credentials = null) {
     $repository = getRepository($config);
     if (isset($config['pass']) || isset($credentials)) {
         if (empty($config['workspace'])) {

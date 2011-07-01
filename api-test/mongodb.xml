@@ -9,19 +9,20 @@
          syntaxCheck="false"
          bootstrap="bootstrap_mongodb.php">
     <php>
-        <var name="jcr.user" value="admin" />
-        <var name="jcr.pass" value="admin" />
-        <var name="jcr.workspace" value="tests" />
-        <!-- Path to Doctrine stuff for transport -->
-        <var name="jcr.doctrine.loader" value="/var/data/libraries/mongodb/lib/vendor/doctrine-common/lib/Doctrine/Common/ClassLoader.php" />
-        <var name="jcr.doctrine.commondir" value="/var/data/libraries/mongodb/lib/vendor/doctrine-common/lib" />
-        <var name="jcr.doctrine.mongodbdir" value="/var/data/libraries/mongodb/lib" />
-        <var name="jcr.doctrine.mongodb.server" value="mongodb://localhost" />
-        <var name="jcr.doctrine.mongodb.dbname" value="phpcr_tests" />
+        <var name="phpcr.user" value="admin" />
+        <var name="phpcr.pass" value="admin" />
+        <var name="phpcr.workspace" value="tests" />
+        <var name="phpcr.transport" value="mongodb" />
+        <!-- Path to MongoDB stuff for transport -->
+        <var name="phpcr.doctrine.loader" value="/var/data/libraries/mongodb/lib/vendor/doctrine-common/lib/Doctrine/Common/ClassLoader.php" />
+        <var name="phpcr.doctrine.commondir" value="/var/data/libraries/mongodb/lib/vendor/doctrine-common/lib" />
+        <var name="phpcr.doctrine.mongodbdir" value="/var/data/libraries/mongodb/lib" />
+        <var name="phpcr.doctrine.mongodb.server" value="mongodb://localhost" />
+        <var name="phpcr.doctrine.mongodb.dbname" value="phpcr_tests" />
     </php>
 
-   <testsuites>
-        <testsuite name="phpCR">
+    <testsuites>
+        <testsuite name="phpcr">
             <directory>suite/tests/</directory>
         </testsuite>
     </testsuites>
