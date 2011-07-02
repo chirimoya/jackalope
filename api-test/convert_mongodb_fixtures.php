@@ -5,7 +5,7 @@
  * @author Thomas Schedler <thomas@chirimoya.at>
  */
 
-require_once __DIR__ . "/../src/Jackalope/Helper.php";
+require_once __DIR__ . "/../lib/phpcr/src/PHPCR/Util/UUIDHelper.php";
 
 $srcDir = __DIR__ . "/suite/fixtures";
 $destDir = __DIR__ . "/fixtures/mongodb";
@@ -44,6 +44,7 @@ foreach ($ri AS $file) {
 
     echo "Importing " . str_replace($srcDir, "", $file->getPathname())."\n";
     $dataSet = array();
+    $pos = 0;
 
     $nodes = $srcDom->getElementsByTagNameNS('http://www.jcp.org/jcr/sv/1.0', 'node');
     $seenPaths = array();
@@ -60,6 +61,7 @@ foreach ($ri AS $file) {
                 $parent = $parent->parentNode;
             } while ($parent instanceof DOMElement);
 
+            $uuid = \PHPCR\Util\UUIDHelper::generateUUID();
             $attrs = array();
             foreach ($node->childNodes AS $child) {
                 if ($child instanceof DOMElement && $child->tagName == "sv:property") {
@@ -70,28 +72,47 @@ foreach ($ri AS $file) {
                         $value[] = $nodeValue->nodeValue;
                     }
 
-                    $isMulti = (in_array($name, array('jcr:mixinTypes'))) || count($value) > 1;
-                    $attrs[$name] = array(
-                        'type' =>  strtolower($child->getAttributeNS('http://www.jcp.org/jcr/sv/1.0', 'type')),
-                        'value' => ($isMulti) ? $value : current($value),
-                        'multi' => $isMulti,
-                    );
+                    if($name == 'jcr:uuid') {
+                        $uuid = current($value);
+                    } else if($name == 'jcr:primaryType') {
+                        $type = current($value); 
+                    } else {
+                        $isMulti = (in_array($name, array('jcr:mixinTypes'))) || count($value) > 1;
+                        $type = $child->getAttributeNS('http://www.jcp.org/jcr/sv/1.0', 'type');
+                        
+                        switch ($type) {
+                            case 'Binary':
+                                //TODO
+                                break;
+                            case 'Date':
+                                $dates = array();
+                                foreach($value as $date){
+                                    $datetime = \DateTime::createFromFormat('Y-m-d\TH:i:s.uP', $date);
+                                    $datetime->setTimezone(new DateTimeZone('UTC'));
+                                    
+                                    $dates[] = array(
+                                        'date' => array('$date' => $datetime->getTimestamp() * 1000), 
+                                        'timezone' => $datetime->getTimezone()->getName()
+                                    );
+                                    
+                                }
+                                $value = $dates;
+                                break;
+                        }
+                        
+                        $attrs[] = array(
+                            'name' => $name,
+                            'type' => $type,
+                            'value' => ($isMulti) ? $value : current($value),
+                            'multi' => $isMulti,
+                        );
+                    }
                 }
             }
 
-            if (isset($attrs['jcr:uuid']['value'])) {
-                $id = (string) $attrs['jcr:uuid']['value'];
-                $id = new \MongoBinData($id, MongoBinData::UUID);
-                $id = array('$binary' => base64_encode($id->bin), '$type' => (string) sprintf('%02d', $id->type));
-                unset($attrs['jcr:uuid']);
-            }else{  
-                $id = new \MongoId;
-                $id = array('$oid' =>  $id->__toString());
-            }
-            
-            $type = $attrs['jcr:primaryType']['value'];
-            unset($attrs['jcr:primaryType']);
-            
+            $id = new \MongoBinData($uuid, MongoBinData::UUID);
+            $id = array('$binary' => base64_encode($id->bin), '$type' => (string) sprintf('%02d', $id->type));
+          
             $parentPath = implode("/", array_slice(explode("/", $path), 0, -1));
             $parentPath = ($parentPath == '') ? '/' : $parentPath;
             
@@ -103,6 +124,8 @@ foreach ($ri AS $file) {
                 'type' => $type,
                 'props' => $attrs
             );
+            
+            $pos++;
         }
     } else {
         
@@ -116,28 +139,26 @@ foreach ($ri AS $file) {
                     $parent = $parent->parentNode;
                 } while ($parent instanceof DOMElement);
 
+                $uuid = \PHPCR\Util\UUIDHelper::generateUUID();
+                $type = 'nt:unstructured';
                 $attrs = array();
                 foreach ($node->attributes AS $attr) {
                     $name = ($attr->prefix) ? $attr->prefix.":".$attr->name : $attr->name;
-                    $attrs[$name] = $attr->value;
-                }
-
-                if (!isset($attrs['jcr:primaryType'])) {
-                    $attrs['jcr:primaryType'] = 'nt:unstructured';
-                }
-
-                if (isset($attrs['jcr:uuid'])) {
-                    $id = (string) $attrs['jcr:uuid'];
-                    $id = new \MongoBinData($id, MongoBinData::UUID);
-                    $id = array('$binary' => $id->__toString(), '$type' => MongoBinData::UUID);
-                    unset($attrs['jcr:uuid']);
-                }else{  
-                    $id = new \MongoId;
-                    $id = array('$oid' =>  $id->__toString());
-                }
                     
-                $type = $attrs['jcr:primaryType'];
-                unset($attrs['jcr:primaryType']);
+                    if($name == 'jcr:uuid') {
+                        $uuid = $attr->value;
+                    } else if($name == 'jcr:primaryType') {
+                        $type = $attr->value; 
+                    } else {
+                        $attrs[] = array(
+                            'name' => $name,
+                            'value' => $attr->value,
+                        );    
+                    }
+                }
+
+                $id = new \MongoBinData($uuid, MongoBinData::UUID);
+                $id = array('$binary' => $id->__toString(), '$type' => MongoBinData::UUID);
                 
                 if (!isset($seenPaths[$path])) {
                     $parentPath = implode("/", array_slice(explode("/", $path), 0, -1));
@@ -151,9 +172,11 @@ foreach ($ri AS $file) {
                         'type' => 'nt:unstructured',
                         'props' => $attrs
                     );
-                    $seenPaths[$path] = $id;
+                    $seenPaths[$path] = $pos;
+                    $pos++; 
                 } else {
-                    $id = $seenPaths[$path];
+                    $idx = $seenPaths[$path];
+                    $dataSet[$pos]['props'] = array_merge($dataSet[$pos]['props'], $attrs);
                 }
             }
         }

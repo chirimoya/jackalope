@@ -174,7 +174,7 @@ class Client implements TransportInterface
             'parent' => '-1',
             'w_id' => $workspace['_id'],
             'type' => 'nt:unstructured',
-            'props' => new stdClass()
+            'props' => array()
         );
         $coll->insert($rootNode);
     }
@@ -464,7 +464,8 @@ class Client implements TransportInterface
         $data->{'jcr:primaryType'} = $node['type'];
         
         //TODO prepare properties?
-        foreach ($node['props'] as $name => $prop) {
+        foreach ($node['props'] as $prop) {
+            $name = $prop['name'];
             $type = $prop['type'];
             
             if ($type == \PHPCR\PropertyType::TYPENAME_BINARY) {
@@ -714,7 +715,7 @@ class Client implements TransportInterface
             $coll = $this->db->selectCollection(self::COLLNAME_NODES);
             $qb = $coll->createQueryBuilder()
                        ->field('path')->equals($regex)
-                       ->field('w_id')->equals($workspaceId);
+                       ->field('w_id')->equals($this->workspaceId);
     
             $query = $qb->getQuery();
             $nodes = $query->getIterator();
@@ -858,7 +859,7 @@ class Client implements TransportInterface
             foreach ($properties AS $property) {
                 $data = $this->decodeProperty($property, $popertyDefs);
                 if (!empty($data)) {
-                    $props[$property->getName()] = $data;  
+                    $props[] = $data;  
                 }
             }
             
@@ -915,26 +916,35 @@ class Client implements TransportInterface
         $parentPath = $this->validatePath($parent->getPath());
         
         try {
-        
             $data = $this->decodeProperty($property);
         
+            $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+            $qb = $coll->createQueryBuilder()
+                       ->select('_id')
+                       ->findAndUpdate()
+                       ->field('props.name')->equals($property->getName())
+                       ->field('path')->equals($parentPath)
+                       ->field('w_id')->equals($this->workspaceId)
+                       ->field('props.$')->set($data);
+            $query = $qb->getQuery();
+            
+            $node = $query->execute();
+            
+            if (empty($node)) {
+                $qb = $coll->createQueryBuilder()
+                       ->update()
+                       ->field('path')->equals($parentPath)
+                       ->field('w_id')->equals($this->workspaceId)
+                       ->field('props')->push($data);
+                $query = $qb->getQuery();  
+                $query->execute();
+            }
+            
         } catch(\Exception $e) {
-            //echo $path . "\n";
-            //echo $e->getMessage() . "\n";
-            //echo $e->getTraceAsString() . "\n";
-            //exit();
+            throw $e;
         }
         
-        $coll = $this->db->selectCollection(self::COLLNAME_NODES);
-        $qb = $coll->createQueryBuilder()
-                   ->update()
-                   ->upsert()
-                   ->field('props.' . $property->getName())->set($data)
-                   ->field('path')->equals($parentPath)
-                   ->field('w_id')->equals($this->workspaceId);
-        $query = $qb->getQuery();
-        
-        return $query->execute();
+        return true;
     }
     
     /**
@@ -988,14 +998,14 @@ class Client implements TransportInterface
             }
         }
         
-        $data = array(
-            'multi' => $isMultiple,
-        );
-        
         $typeId = $property->getType();
         $type = PropertyType::nameFromValue($typeId);
         
-        $data['type'] = $type;
+        $data = array(
+            'multi' => $isMultiple,
+            'name'  => $property->getName(),
+            'type'  => $type,
+        );
 
         $binaryData = null;
         switch ($typeId) {
@@ -1308,11 +1318,23 @@ $/xi";
         $path = $this->validatePath($path);
         $type = $weak_reference ? \PHPCR\PropertyType::TYPENAME_WEAKREFERENCE : \PHPCR\PropertyType::TYPENAME_REFERENCE;
 
-        // FIXME query is not correct!
         $coll = $this->db->selectCollection(self::COLLNAME_NODES);
         $qb = $coll->createQueryBuilder()
-                   ->field('props.$.type')->equals($type)
+                   ->select('_id')
                    ->field('path')->equals($path)
+                   ->field('w_id')->equals($this->workspaceId);
+        $query = $qb->getQuery();
+        $node = $query->getSingleResult();
+        
+        if (empty($node)) {
+            throw new \PHPCR\ItemNotFoundException("Item ".$path." not found.");
+        }
+        
+        // TODO check if query is correct
+        
+        $qb = $coll->createQueryBuilder()
+                   ->field('props.type')->equals($type)
+                   ->field('props.value')->equals($node['_id']->bin)
                    ->field('w_id')->equals($this->workspaceId);
         $query = $qb->getQuery();
         
@@ -1320,21 +1342,15 @@ $/xi";
         
         $references = array();
         foreach ($nodes as $node) {
-            
+            foreach ($node['props'] as $property) {
+                if($property['type'] == $type){
+                    if ($name === null || $property['name'] == $name) {
+                        $references[] = $node['path'] . '/' . $property['name'];
+                    }
+                }
+            }
         }
         
-        /*
-        $sql = "SELECT p.path, p.name FROM jcrprops p " .
-               "INNER JOIN jcrnodes r ON r.identifier = p.string_data AND p.w_id = ? AND r.w_id = ?" .
-               "WHERE r.path = ? AND p.type = ?";
-        $properties = $this->conn->fetchAll($sql, array($this->workspaceId, $this->workspaceId, $path, $type));
-
-        $references = array();
-        foreach ($properties AS $property) {
-            if ($name === null || $property['name'] == $name) {
-                $references[] = "/" . $property['path'];
-            }
-        }*/
         
         return $references;
     }

@@ -63,7 +63,7 @@ $node = array(
     'parent' => '-1',
     'w_id' => new \MongoId('4e00e8fea381601b08000000'),
     'type' => 'nt:unstructured',
-    'props' => new stdClass()
+    'props' => array()
 );
 $coll->insert($node);
 
