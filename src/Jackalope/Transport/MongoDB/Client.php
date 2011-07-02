@@ -627,7 +627,8 @@ class Client implements TransportInterface
         }*/
 
         if (!$this->pathExists($path)) {
-            throw new \PHPCR\ItemNotFoundException("No item found at ".$path);
+            $this->deleteProperty($path); //FIXME
+            //throw new \PHPCR\ItemNotFoundException("No item found at ".$path);
         }
 
         try {
@@ -640,7 +641,7 @@ class Client implements TransportInterface
             $qb = $coll->createQueryBuilder()
                        ->remove()
                        ->field('path')->equals($regex)
-                       ->field('w_id')->equals($workspaceId);
+                       ->field('w_id')->equals($this->workspaceId);
             $query = $qb->getQuery();
         
             return $query->execute();
@@ -659,13 +660,22 @@ class Client implements TransportInterface
      */
     public function deleteProperty($path)
     {
-        $path = $this->validatePath($path);
         $this->assertLoggedIn();
-
-        $query = "DELETE FROM jcrprops WHERE path = ? AND w_id = ?";
-        $this->conn->executeUpdate($query, array($path, $this->workspaceId));
-
-        return true;
+        
+        $path = $this->validatePath($path);
+        $parentPath = $this->getParentPath($path);
+        
+        $name = trim(str_replace($parentPath, '', $path), '/');
+        
+        $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+        $qb = $coll->createQueryBuilder()
+                   ->update()
+                   ->field('props.' . $name)->unsetField()
+                   ->field('path')->equals($parentPath)
+                   ->field('w_id')->equals($this->workspaceId);
+        $query = $qb->getQuery();
+        
+        return $query->execute();
     }
 
     /**
@@ -676,12 +686,51 @@ class Client implements TransportInterface
      * @return void
      *
      * @link http://www.ietf.org/rfc/rfc2518.txt
+     * @see \Jackalope\Workspace::moveNode
      */
     public function moveNode($srcAbsPath, $dstAbsPath)
     {
         $this->assertLoggedIn();
+        
+        $srcAbsPath = $this->validatePath($srcAbsPath);
+        $dstAbsPath = $this->validatePath($dstAbsPath);
 
-        throw new \Jackalope\NotImplementedException("Moving nodes is not yet implemented");
+        if (!$this->pathExists($srcAbsPath)) {
+            throw new \PHPCR\PathNotFoundException("Source path '".$srcAbsPath."' not found");
+        }
+
+        if ($this->pathExists($dstAbsPath)) {
+            throw new \PHPCR\ItemExistsException("Cannot copy to destination path '" . $dstAbsPath . "' that already exists.");
+        }
+
+        if (!$this->pathExists($this->getParentPath($dstAbsPath))) {
+            throw new \PHPCR\PathNotFoundException("Parent of the destination path '" . $this->getParentPath($dstAbsPath) . "' has to exist.");
+        }
+        
+        try {
+
+            $regex = new \MongoRegex('/^' . addcslashes($srcAbsPath, '/') . '/'); 
+            
+            $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+            $qb = $coll->createQueryBuilder()
+                       ->field('path')->equals($regex)
+                       ->field('w_id')->equals($workspaceId);
+    
+            $query = $qb->getQuery();
+            $nodes = $query->getIterator();
+            
+            foreach ($nodes as $node){
+                $newPath = str_replace($srcAbsPath, $dstAbsPath, $node['path']);
+                
+                $node['path'] = $newPath;
+                $node['parent'] = $this->getParentPath($newPath);
+                
+                $coll->save($node);
+            }
+            
+        } catch (\Exception $e) {
+            throw $e;
+        }
     }
 
     /**
@@ -692,7 +741,8 @@ class Client implements TransportInterface
      */
     private function getParentPath($path)
     {
-        return implode("/", array_slice(explode("/", $path), 0, -1));
+        $parentPath = implode('/', array_slice(explode('/', $path), 0, -1));
+        return ($parentPath != '') ? $parentPath : '/';
     }
 
     private function validateNode(\PHPCR\NodeInterface $node, \PHPCR\NodeType\NodeTypeDefinitionInterface $def)
@@ -1256,8 +1306,24 @@ $/xi";
     protected function getNodeReferences($path, $name = null, $weak_reference = false)
     {
         $path = $this->validatePath($path);
-        $type = $weak_reference ? \PHPCR\PropertyType::WEAKREFERENCE : \PHPCR\PropertyType::REFERENCE;
+        $type = $weak_reference ? \PHPCR\PropertyType::TYPENAME_WEAKREFERENCE : \PHPCR\PropertyType::TYPENAME_REFERENCE;
 
+        // FIXME query is not correct!
+        $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+        $qb = $coll->createQueryBuilder()
+                   ->field('props.$.type')->equals($type)
+                   ->field('path')->equals($path)
+                   ->field('w_id')->equals($this->workspaceId);
+        $query = $qb->getQuery();
+        
+        $nodes = $query->getIterator();
+        
+        $references = array();
+        foreach ($nodes as $node) {
+            
+        }
+        
+        /*
         $sql = "SELECT p.path, p.name FROM jcrprops p " .
                "INNER JOIN jcrnodes r ON r.identifier = p.string_data AND p.w_id = ? AND r.w_id = ?" .
                "WHERE r.path = ? AND p.type = ?";
@@ -1268,7 +1334,8 @@ $/xi";
             if ($name === null || $property['name'] == $name) {
                 $references[] = "/" . $property['path'];
             }
-        }
+        }*/
+        
         return $references;
     }
 
