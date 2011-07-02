@@ -78,17 +78,24 @@ foreach ($ri AS $file) {
                         $type = current($value); 
                     } else {
                         $isMulti = (in_array($name, array('jcr:mixinTypes'))) || count($value) > 1;
-                        $type = $child->getAttributeNS('http://www.jcp.org/jcr/sv/1.0', 'type');
+                        $propertyType = $child->getAttributeNS('http://www.jcp.org/jcr/sv/1.0', 'type');
                         
-                        switch ($type) {
+                        switch ($propertyType) {
                             case 'Binary':
-                                //TODO
+                                $binaries = array();
+                                foreach($value as $binary){
+                                    $binaries[] = strlen(base64_decode($binary));
+                                    
+                                    //TODO store binaries, but how ?? 
+                                }
+                                $value = $binaries;
                                 break;
                             case 'Date':
                                 $dates = array();
                                 foreach($value as $date){
                                     $datetime = \DateTime::createFromFormat('Y-m-d\TH:i:s.uP', $date);
-                                    $datetime->setTimezone(new DateTimeZone('UTC'));
+                                    $datetime->modify('-1 hour');
+                                    $datetime->setTimezone(new DateTimeZone('Europe/London'));
                                     
                                     $dates[] = array(
                                         'date' => array('$date' => $datetime->getTimestamp() * 1000), 
@@ -102,7 +109,7 @@ foreach ($ri AS $file) {
                         
                         $attrs[] = array(
                             'name' => $name,
-                            'type' => $type,
+                            'type' => $propertyType,
                             'value' => ($isMulti) ? $value : current($value),
                             'multi' => $isMulti,
                         );
