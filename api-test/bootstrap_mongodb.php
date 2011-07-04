@@ -42,30 +42,6 @@ require_once(dirname(__FILE__) . '/../src/Jackalope/autoloader.php');
 
 $dbConn = new \Doctrine\MongoDB\Connection($GLOBALS['phpcr.doctrine.mongodb.server']);
 $db = $dbConn->selectDatabase($GLOBALS['phpcr.doctrine.mongodb.dbname']);
-$db->drop();
-
-$coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_WORKSPACES);
-$workspace = array(
-    'name' => 'default'
-);
-$coll->insert($workspace);
-
-$coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_WORKSPACES);
-$workspace = array(
-    '_id' => new \MongoId('4e00e8fea381601b08000000'),
-    'name' => $GLOBALS['phpcr.workspace']
-);
-$coll->insert($workspace);
-
-$coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_NODES);
-$node = array(
-    'path' => '/',
-    'parent' => '-1',
-    'w_id' => new \MongoId('4e00e8fea381601b08000000'),
-    'type' => 'nt:unstructured',
-    'props' => array()
-);
-$coll->insert($node);
 
 /**
  * @return string classname of the repository factory
@@ -138,9 +114,38 @@ function getPHPCRSession($config, $credentials = null) {
     }
 }
 
-function getFixtureLoader($config)
-{
+function getFixtureLoader($config) {
+    global $db;
     return new MongoDbFixtureLoader($config['doctrine.mongodb.dbname'], __DIR__ . "/fixtures/mongodb/");
+}
+
+function resetDb() {
+    global $db;
+    
+    $db->drop();
+
+    $coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_WORKSPACES);
+    $workspace = array(
+        'name' => 'default'
+    );
+    $coll->insert($workspace);
+    
+    $coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_WORKSPACES);
+    $workspace = array(
+        '_id' => new \MongoId('4e00e8fea381601b08000000'),
+        'name' => $GLOBALS['phpcr.workspace']
+    );
+    $coll->insert($workspace);
+    
+    $coll = $db->selectCollection(\Jackalope\Transport\MongoDB\Client::COLLNAME_NODES);
+    $node = array(
+        'path' => '/',
+        'parent' => '-1',
+        'w_id' => new \MongoId('4e00e8fea381601b08000000'),
+        'type' => 'nt:unstructured',
+        'props' => array()
+    );
+    $coll->insert($node);  
 }
 
 require_once "suite/inc/importexport.php";
@@ -158,6 +163,8 @@ class MongoDbFixtureLoader implements phpcrApiTestSuiteImportExportFixtureInterf
 
     public function import($file)
     {
+        resetDb();
+        
         $file = $this->fixturePath . $file . ".json";
         
         //FIXME
