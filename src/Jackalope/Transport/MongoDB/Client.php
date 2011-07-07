@@ -27,6 +27,7 @@ use PHPCR\RepositoryException;
 use PHPCR\Util\UUIDHelper;
 use Jackalope\TransportInterface;
 use Jackalope\Helper;
+use Jackalope\Transport\Client as ClientAbstract;
 use Jackalope\NodeType\NodeTypeManager;
 use Jackalope\NodeType\PHPCR2StandardNodeTypes;
 use Doctrine\MongoDb\Connection;
@@ -35,7 +36,7 @@ use Doctrine\MongoDb\Database;
 /**
  * @author Thomas Schedler <thomas@chirimoya.at>
  */
-class Client implements TransportInterface
+class Client extends ClientAbstract implements TransportInterface
 {
     
     /**
@@ -63,57 +64,6 @@ class Client implements TransportInterface
      * @var Doctrine\MongoDB\Database
      */
     private $db;
-
-    /**
-     * @var bool
-     */
-    private $loggedIn = false;
-
-    /**
-     * @var int|string
-     */
-    private $workspaceId;
-
-    /**
-     * @var array
-     */
-    private $nodeTypes = array(
-        "nt:file" => array(
-            "is_abstract" => false,
-            "properties" => array(
-                "jcr:primaryType" => array('multi_valued' => false),
-                "jcr:mixinTypes" => array('multi_valued' => true),
-            ),
-        ),
-        "nt:folder" => array(
-            "is_abstract" => false,
-            "properties" => array(
-                "jcr:primaryType" => array('multi_valued' => false),
-                "jcr:mixinTypes" => array('multi_valued' => true),
-            ),
-        ),
-    );
-
-    /**
-     * @var PHPCR\NodeType\NodeTypeManagerInterface
-     */
-    private $nodeTypeManager = null;
-
-    /**
-     * @var array
-     */
-    private $userNamespaces = null;
-
-    /**
-     * @var array
-     */
-    private $validNamespacePrefixes = array(
-        \PHPCR\NamespaceRegistryInterface::PREFIX_EMPTY => true,
-        \PHPCR\NamespaceRegistryInterface::PREFIX_JCR   => true,
-        \PHPCR\NamespaceRegistryInterface::PREFIX_NT    => true,
-        \PHPCR\NamespaceRegistryInterface::PREFIX_MIX   => true,
-        \PHPCR\NamespaceRegistryInterface::PREFIX_XML   => true,
-    );
     
     /**
      * Create a transport pointing to a server url.
@@ -150,7 +100,7 @@ class Client implements TransportInterface
      * @throws \PHPCR\RepositoryException if another error occurs.
      * @api
      */
-    public function createWorkspace($name, $srcWorkspace = null)
+    public function createWorkspace($workspaceName, $srcWorkspace = null)
     {
         if ($srcWorkspace !== null) {
             throw new \Jackalope\NotImplementedException();
@@ -233,33 +183,6 @@ class Client implements TransportInterface
         $workspace = $query->getSingleResult();
 
         return ($workspace != null) ? $workspace['_id'] : false;
-    }
-
-    /**
-     * Assert logged in.
-     * 
-     * @return void
-     * 
-     * @throws \PHPCR\RepositoryException if not logged in 
-     */
-    private function assertLoggedIn()
-    {
-        if (!$this->loggedIn) {
-            throw new RepositoryException();
-        }
-    }
-
-    /**
-     * Get the repository descriptors from the jackrabbit server
-     * This happens without login or accessing a specific workspace.
-     *
-     * @return Array with name => Value for the descriptors
-     * 
-     * @throws \PHPCR\RepositoryException if error occurs
-     */
-    public function getRepositoryDescriptors()
-    {
-        return array(); //TODO
     }
 
     /**
@@ -517,28 +440,6 @@ class Client implements TransportInterface
     }
     
     /**
-     * Get the nodes from an array of absolute paths
-     *
-     * @param array $path Absolute paths to the nodes.
-     * @return array associative array for the node (decoded from json with associative = true)
-     *
-     * @throws \PHPCR\RepositoryException if not logged in
-     */
-    public function getNodes($paths)
-    {
-        $nodes = array();
-        foreach ($paths as $key => $path) {
-            try {
-                $nodes[$key] = $this->getNode($path);
-            } catch (\PHPCR\ItemNotFoundException $e) {
-                // ignore
-            }
-        }
-
-        return $nodes;
-    }
-
-    /**
      * Check-in item at path.
      *
      * @param string $path
@@ -731,74 +632,6 @@ class Client implements TransportInterface
             
         } catch (\Exception $e) {
             throw $e;
-        }
-    }
-
-    /**
-     * Get parent path of a path.
-     * 
-     * @param  string $path
-     * @return string
-     */
-    private function getParentPath($path)
-    {
-        $parentPath = implode('/', array_slice(explode('/', $path), 0, -1));
-        return ($parentPath != '') ? $parentPath : '/';
-    }
-
-    private function validateNode(\PHPCR\NodeInterface $node, \PHPCR\NodeType\NodeTypeDefinitionInterface $def)
-    {
-        foreach ($def->getDeclaredChildNodeDefinitions() AS $childDef) {
-            /* @var $childDef \PHPCR\NodeType\NodeDefinitionInterface */
-            if (!$node->hasNode($childDef->getName())) {
-                if ($childDef->isMandatory() && !$childDef->isAutoCreated()) {
-                    throw new \PHPCR\RepositoryException(
-                        "Child " . $child->getName() . " is mandatory, but is not present while ".
-                        "saving " . $def->getName() . " at " . $node->getPath()
-                    );
-                } else if ($childDef->isAutoCreated()) {
-
-                }
-
-                if ($node->hasProperty($childDef->getName())) {
-                    throw new \PHPCR\RepositoryException(
-                        "Node " . $node->getPath() . " has property with name ".
-                        $childDef->getName() . " but its node type '". $def->getName() . "' defines a ".
-                        "child with this name."
-                    );
-                }
-            }
-        }
-
-        foreach ($def->getDeclaredPropertyDefinitions() AS $propertyDef) {
-            /* @var $propertyDef \PHPCR\NodeType\PropertyDefinitionInterface */
-            if ($propertyDef->getName() == '*') {
-                continue;
-            }
-
-            if (!$node->hasProperty($propertyDef->getName())) {
-                if ($propertyDef->isMandatory() && !$propertyDef->isAutoCreated()) {
-                    throw new \PHPCR\RepositoryException(
-                        "Property " . $propertyDef->getName() . " is mandatory, but is not present while ".
-                        "saving " . $def->getName() . " at " . $node->getPath()
-                    );
-                } else if ($propertyDef->isAutoCreated()) {
-                    $defaultValues = $propertyDef->getDefaultValues();
-                    $node->setProperty(
-                        $propertyDef->getName(),
-                        $propertyDef->isMultiple() ? $defaultValues : (isset($defaultValues[0]) ? $defaultValues[0] : null),
-                        $propertyDef->getRequiredType()
-                    );
-                }
-
-                if ($node->hasNode($propertyDef->getName())) {
-                    throw new \PHPCR\RepositoryException(
-                        "Node " . $node->getPath() . " has child with name ".
-                        $propertyDef->getName() . " but its node type '". $def->getName() . "' defines a ".
-                        "property with this name."
-                    );
-                }
-            }
         }
     }
 
@@ -1079,7 +912,6 @@ class Client implements TransportInterface
         
         
         if ($binaryData) {
-            
             try {    
                 foreach ($binaryData AS $idx => $binary) {
                     $grid = $this->db->getGridFS();
@@ -1088,9 +920,7 @@ class Client implements TransportInterface
                         'w_id' => $this->workspaceId,
                         'idx'  => $idx
                     ));
-                    
                 }
-                
             } catch (\Exception $e) {
                 throw $e;
             }
@@ -1098,55 +928,6 @@ class Client implements TransportInterface
         
         return $data;
     }
-
-    /**
-     * Validation if all the data is correct before writing it into the database.
-     *
-     * @param int $type
-     * @param mixed $value
-     * @param string $path
-     * @return void
-     * 
-     * @throws \PHPCR\ValueFormatException
-     */
-    private function assertValidPropertyValue($type, $value, $path)
-    {
-        if ($type === \PHPCR\PropertyType::NAME) {
-            if (strpos($value, ":") !== false) {
-                list($prefix, $localName) = explode(":", $value);
-
-                $this->getNamespaces();
-                if (!isset($this->validNamespacePrefixes[$prefix])) {
-                    throw new \PHPCR\ValueFormatException("Invalid JCR NAME at " . $path . ": The namespace prefix " . $prefix . " does not exist.");
-                }
-            }
-        } else if ($type === \PHPCR\PropertyType::PATH) {
-            if (!preg_match('((/[a-zA-Z0-9:_-]+)+)', $value)) {
-                throw new \PHPCR\ValueFormatException("Invalid PATH at " . $path .": Segments are seperated by / and allowed chars are a-zA-Z0-9:_-");
-            }
-        } else if ($type === \PHPCR\PropertyType::URI) {
-            if (!preg_match(self::VALIDATE_URI_RFC3986, $value)) {
-                throw new \PHPCR\ValueFormatException("Invalid URI at " . $path .": Has to follow RFC 3986.");
-            }
-        }
-    }
-
-    const VALIDATE_URI_RFC3986 = "
-/^
-([a-z][a-z0-9\*\-\.]*):\/\/
-(?:
-  (?:(?:[\w\.\-\+!$&'\(\)*\+,;=]|%[0-9a-f]{2})+:)*
-  (?:[\w\.\-\+%!$&'\(\)*\+,;=]|%[0-9a-f]{2})+@
-)?
-(?:
-  (?:[a-z0-9\-\.]|%[0-9a-f]{2})+
-  |(?:\[(?:[0-9a-f]{0,4}:)*(?:[0-9a-f]{0,4})\])
-)
-(?::[0-9]+)?
-(?:[\/|\?]
-  (?:[\w#!:\.\?\+=&@!$'~*,;\/\(\)\[\]\-]|%[0-9a-f]{2})
-*)?
-$/xi";
 
     /**
      * Get the node path from a JCR uuid
@@ -1174,20 +955,6 @@ $/xi";
             throw new \PHPCR\ItemNotFoundException("no item found with uuid ".$uuid);
         }
         return $node['path'];
-    }
-
-    /**
-     * Returns node types
-     * @param array nodetypes to request
-     * @return dom with the definitions
-     * @throws \PHPCR\RepositoryException if not logged in
-     */
-    public function getNodeTypes($nodeTypes = array())
-    {
-        // TODO: Filter for the passed nodetypes
-        // TODO: Check database for user node-types.
-
-        return PHPCR2StandardNodeTypes::getNodeTypeData();
     }
 
     /**
@@ -1225,9 +992,29 @@ $/xi";
         throw new \Jackalope\NotImplementedException("Not implemented yet");
     }
 
+    /**
+     * Retrieve a stream of a binary property value
+     *
+     * @param $path The path to the property with the binary data
+     * @return resource with binary data
+     */
     public function getBinaryStream($path)
-    {
-        throw new \Jackalope\NotImplementedException("Not implemented yet");
+    {   
+        $grid = $this->db->getGridFS();
+        $binary = $grid->getMongoCollection()->findOne(array(
+            'path' => $path,
+            'w_id' => $this->workspaceId
+        ));
+        
+        if (empty($binary)) {
+            throw new \PHPCR\ItemNotFoundException("Binary ".$path." not found.");
+        }
+        
+        // TODO: OPTIMIZE stream handling!
+        $stream = fopen('php://memory', 'rwb+');
+        fwrite($stream, $binary->getBytes());
+        rewind($stream);
+        return $stream;
     }
 
     public function getProperty($path)
@@ -1282,30 +1069,6 @@ $/xi";
     }
 
     /**
-     * Returns the path of all accessible REFERENCE properties in the workspace that point to the node
-     *
-     * @param string $path
-     * @param string $name name of referring REFERENCE properties to be returned; if null then all referring REFERENCEs are returned
-     * @return array
-     */
-    public function getReferences($path, $name = null)
-    {
-        return $this->getNodeReferences($path, $name, false);
-    }
-
-    /**
-     * Returns the path of all accessible WEAKREFERENCE properties in the workspace that point to the node
-     *
-     * @param string $path
-     * @param string $name name of referring WEAKREFERENCE properties to be returned; if null then all referring WEAKREFERENCEs are returned
-     * @return array
-     */
-    public function getWeakReferences($path, $name = null)
-    {
-        return $this->getNodeReferences($path, $name, true);
-    }
-
-    /**
      * Returns the path of all accessible reference properties in the workspace that point to the node.
      * If $weak_reference is false (default) only the REFERENCE properties are returned, if it is true, only WEAKREFERENCEs.
      * @param string $path
@@ -1353,53 +1116,5 @@ $/xi";
         
         
         return $references;
-    }
-
-
-    /**
-     * Return the permissions of the current session on the node given by path.
-     * The result of this function is an array of zero, one or more strings from add_node, read, remove, set_property.
-     *
-     * @param string $path the path to the node we want to check
-     * @return array of string
-     */
-    public function getPermissions($path)
-    {
-        return array(
-            \PHPCR\SessionInterface::ACTION_ADD_NODE,
-            \PHPCR\SessionInterface::ACTION_READ,
-            \PHPCR\SessionInterface::ACTION_REMOVE,
-            \PHPCR\SessionInterface::ACTION_SET_PROPERTY
-        );
-    }
-    
-    /**
-     * Validate path.
-     * 
-     * @param $path
-     * @return string
-     */
-    protected function validatePath($path)
-    {
-        $this->ensureValidPath($path);
-        
-        return $path; 
-    }
-
-    /**
-     * Ensure path is valid.
-     * 
-     * @param $path
-     * 
-     * @throws \PHPCR\RepositoryException if path is not well-formed or contains invalid characters 
-     */
-    protected function ensureValidPath($path)
-    {
-        if (! (strpos($path, '//') === false
-              && strpos($path, '/../') === false
-              && preg_match('/^[\w{}\/#:^+~*\[\]\. -]*$/i', $path))
-        ) {
-            throw new \PHPCR\RepositoryException('Path is not well-formed or contains invalid characters: ' . $path);
-        }
     }
 }
