@@ -23,6 +23,7 @@ class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
     );
     private $optional = array(
         'jackalope.factory' => 'string or object: Use a custom factory class for Jackalope objects',
+    	'jackalope.disable_transactions' => 'boolean: if set and not empty, transactions are disabled, otherwise transactions are enabled',
     );
 
     /**
@@ -56,7 +57,8 @@ class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
 
         $transport = $factory->get('Transport\MongoDB\Client', array($db));
        
-        return new Repository($factory, null, $transport);
+        $transactions = empty($parameters['jackalope.disable_transactions']);
+        return new Repository($factory, $transport, $transactions);
     }
 
     /**
