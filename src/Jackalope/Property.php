@@ -123,8 +123,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
                   $targettype = $type;
                   /*
               } else {
-                  //convert to property type
-                  $targettype = $this->type;
+                  //convert to an allowed type. if the current type is defined $targettype = $this->type;
               }
             */
         }
@@ -385,6 +384,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
             case PropertyType::REFERENCE:
                 try {
                     foreach ($values as $value) {
+                        // OPTIMIZE: use objectManager->getNodes instead of looping
                         $results[] = $this->objectManager->getNode($value);
                     }
                 } catch(\PHPCR\ItemNotFoundException $e) {
@@ -393,6 +393,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
                 break;
             case PropertyType::WEAKREFERENCE:
                 foreach ($values as $value) {
+                    // OPTIMIZE: use objectManager->getNodes instead of looping
                     $results[] = $this->objectManager->getNode($value);
                 }
                 break;
@@ -400,6 +401,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
             case PropertyType::STRING:
             case PropertyType::NAME:
                 foreach ($values as $value) {
+                    // OPTIMIZE: use objectManager->getNodes instead of looping (but paths need to be absolute then)
                     $results[] = $this->objectManager->getNode($value, $this->parentPath);
                 }
                 break;
