@@ -11,7 +11,7 @@ use PHPCR\RepositoryFactoryInterface;
  *
  *    $factory = new \Jackalope\RepositoryFactoryMongoDB;
  *
- *    $parameters = array('' => 'http://localhost:8080/server/');
+ *    $parameters = array('jackalope.mongodb_database' => $db);
  *    $repo = $factory->getRepository($parameters);
  *
  * @api
@@ -43,7 +43,16 @@ class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
         if (null == $parameters) {
             return null;
         }
-        // TODO: check if all required parameters specified
+        
+        // check if we have all required keys
+        $present = array_intersect_key($this->required, $parameters);
+        if (count(array_diff_key($this->required, $present))) {
+            return null;
+        }
+        $defined = array_intersect_key(array_merge($this->required, $this->optional), $parameters);
+        if (count(array_diff_key($defined, $parameters))) {
+            return null;
+        }
 
         if (isset($parameters['jackalope.factory'])) {
             $factory = is_object($parameters['jackalope.factory']) ?
