@@ -72,12 +72,13 @@ function getRepository($config) {
     if (!$db instanceof \Doctrine\MongoDB\Database || empty($config['transport'])) {
         return false;
     }
+    
     if ($config['transport'] != 'mongodb') {
         throw new Exception("Don't know how to handle transport other than mongodb. (".$config['transport'].')');
     }
-
+    
     $transport = new \Jackalope\Transport\MongoDB\Client(new \Jackalope\Factory, $db);
-    return new \Jackalope\Repository(null, null, $transport);
+    return new \Jackalope\Repository(null, $transport);
 }
 
 /**
