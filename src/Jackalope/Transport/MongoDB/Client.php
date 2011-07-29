@@ -3,7 +3,7 @@
 /**
  * Class to handle the communication between Jackalope and MongoDB.
  *
- * @license http://www.apache.org/licenses/LICENSE-2.0  Apache License Version 2.0, January 2004
+ * @license http://www.apache.org/licenses/LICENSE-2.0  Apache License Version 2.0', January 2004
  *   Licensed under the Apache License, Version 2.0 (the "License") {}
  *   you may not use this file except in compliance with the License.
  *   You may obtain a copy of the License at
@@ -386,7 +386,6 @@ class Client extends ClientAbstract implements TransportInterface
         }
         $data->{'jcr:primaryType'} = $node['type'];
         
-        //TODO prepare properties?
         foreach ($node['props'] as $prop) {
             $name = $prop['name'];
             $type = $prop['type'];
@@ -517,38 +516,34 @@ class Client extends ClientAbstract implements TransportInterface
         $path = $this->validatePath($path);
         $this->assertLoggedIn();
 
-        //TODO check if there is a node with a reference to this or a subnode of the path
-        /*
-        $match = $path."%";
-        $query = "SELECT node_identifier FROM jcrprops WHERE type = ? AND string_data LIKE ? AND w_id = ?";
-        if ($ident = $this->conn->fetchColumn($query, array(\PHPCR\PropertyType::REFERENCE, $match, $this->workspaceId))) {
-            throw new \PHPCR\ReferentialIntegrityException(
-                "Cannot delete item at path '".$path."', there is at least one item (ident ".$ident.") with ".
-                "a reference to this or a subnode of the path."
-            );
-        }*/
-
         if (!$this->pathExists($path)) {
-            $this->deleteProperty($path); //FIXME
-            //throw new \PHPCR\ItemNotFoundException("No item found at ".$path);
-        }
-
-        try {
-            
-            //TODO Soft Delete??
-            
-            $regex = new \MongoRegex('/^' . addcslashes($path, '/') . '/'); 
-            
-            $coll = $this->db->selectCollection(self::COLLNAME_NODES);
-            $qb = $coll->createQueryBuilder()
-                       ->remove()
-                       ->field('path')->equals($regex)
-                       ->field('w_id')->equals($this->workspaceId);
-            $query = $qb->getQuery();
+            $this->deleteProperty($path);
+        } else {
         
-            return $query->execute();
-        } catch(\Exception $e) {
-            return false;
+            //TODO check subnode references!
+            if(count($this->getReferences($path)) > 0 || count($this->getWeakReferences($path)) > 0){
+                throw new \PHPCR\ReferentialIntegrityException(
+                    "Cannot delete item at path '".$path."', there is at least one item with ".
+                    "a reference to this or a subnode of the path."
+                ); 
+                return false;
+            }
+            
+            try {
+                
+                $regex = new \MongoRegex('/^' . addcslashes($path, '/') . '/'); 
+                
+                $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+                $qb = $coll->createQueryBuilder()
+                           ->remove()
+                           ->field('path')->equals($regex)
+                           ->field('w_id')->equals($this->workspaceId);
+                $query = $qb->getQuery();
+            
+                return $query->execute();
+            } catch(\Exception $e) {
+                return false;
+            }
         }
     }
 
@@ -570,9 +565,23 @@ class Client extends ClientAbstract implements TransportInterface
         $name = trim(str_replace($parentPath, '', $path), '/');
         
         $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+        
+        $qb = $coll->createQueryBuilder()
+                   ->select('_id')
+                   ->field('props.name')->equals($name)
+                   ->field('path')->equals($parentPath)
+                   ->field('w_id')->equals($this->workspaceId);
+        $query = $qb->getQuery();
+    
+        $property = $query->getSingleResult();
+        
+        if (!$property) {
+            throw new \PHPCR\ItemNotFoundException("Property ".$path." not found.");
+        }
+        
         $qb = $coll->createQueryBuilder()
                    ->update()
-                   ->field('props.' . $name)->unsetField()
+                   ->field('props')->pull(array('name' => $name))
                    ->field('path')->equals($parentPath)
                    ->field('w_id')->equals($this->workspaceId);
         $query = $qb->getQuery();
@@ -686,7 +695,7 @@ class Client extends ClientAbstract implements TransportInterface
         $properties = $node->getProperties();
 
         try {
-            $nodeIdentifier = (isset($properties['jcr:uuid'])) ? $properties['jcr:uuid']->getNativeValue() :  UUIDHelper::generateUUID();
+            $nodeIdentifier = (isset($properties['jcr:uuid'])) ? $properties['jcr:uuid']->getNativeValue() : UUIDHelper::generateUUID();
             
             $props = array();
             foreach ($properties AS $property) {
@@ -719,7 +728,9 @@ class Client extends ClientAbstract implements TransportInterface
             }
             
             if ($node->hasNodes()) {
-                // TODO save all chiles?
+                foreach($node->getNodes() as $childNode) {
+                    $this->storeNode($childNode);
+                }
             }            
             
         } catch(\Exception $e) {
@@ -1067,6 +1078,28 @@ class Client extends ClientAbstract implements TransportInterface
         $query = $qb->getQuery();
         $coll->remove($query);
     }
+    
+    /**
+     * Returns node types
+     * @param array nodetypes to request
+     * @return dom with the definitions
+     * @throws \PHPCR\RepositoryException if not logged in
+     */
+    public function getNodeTypes($nodeTypes = array())
+    {
+        $nodeTypes = array_flip($nodeTypes);
+
+        // TODO: Filter for the passed nodetypes
+        // TODO: Check database for user node-types.
+        $data = PHPCR2StandardNodeTypes::getNodeTypeData();
+        $filteredData = array();
+        foreach ($data AS $nodeTypeData) {
+            if (isset($nodeTypes[$nodeTypeData['name']])) {
+                $filteredData[] = $nodeTypeData;
+            }
+        }
+        return $filteredData;
+    }
 
     /**
      * Returns the path of all accessible reference properties in the workspace that point to the node.
@@ -1093,8 +1126,6 @@ class Client extends ClientAbstract implements TransportInterface
             throw new \PHPCR\ItemNotFoundException("Item ".$path." not found.");
         }
         
-        // TODO check if query is correct
-        
         $qb = $coll->createQueryBuilder()
                    ->field('props.type')->equals($type)
                    ->field('props.value')->equals($node['_id']->bin)
@@ -1116,5 +1147,84 @@ class Client extends ClientAbstract implements TransportInterface
         
         
         return $references;
+    }
+    
+    /**
+     * Return the permissions of the current session on the node given by path.
+     * The result of this function is an array of zero, one or more strings from add_node, read, remove, set_property.
+     *
+     * @param string $path the path to the node we want to check
+     * @return array of string
+     */
+    public function getPermissions($path)
+    {
+        return array(
+            \PHPCR\SessionInterface::ACTION_ADD_NODE,
+            \PHPCR\SessionInterface::ACTION_READ,
+            \PHPCR\SessionInterface::ACTION_REMOVE,
+            \PHPCR\SessionInterface::ACTION_SET_PROPERTY
+        );
+    }
+        
+    /**
+     * Get the repository descriptors from the jackrabbit server
+     * This happens without login or accessing a specific workspace.
+     *
+     * @return Array with name => Value for the descriptors
+     * @throws \PHPCR\RepositoryException if error occurs
+     */
+    public function getRepositoryDescriptors()
+    {
+        return array(
+          'identifier.stability' => \PHPCR\RepositoryInterface::IDENTIFIER_STABILITY_INDEFINITE_DURATION,
+          'jcr.repository.name'  => 'jackalope_mongodb',
+          'jcr.repository.vendor' => 'Jackalope Community',
+          'jcr.repository.vendor.url' => 'http://github.com/jackalope',
+          'jcr.repository.version' => '1.0.0-DEV',
+          'jcr.specification.name' => 'Content Repository for PHP',
+          'jcr.specification.version' => 'false',
+          'level.1.supported' => 'false',
+          'level.2.supported' => 'false',
+          'node.type.management.autocreated.definitions.supported' => 'true',
+          'node.type.management.inheritance' => 'true',
+          'node.type.management.multiple.binary.properties.supported' => 'true',
+          'node.type.management.multivalued.properties.supported' => 'true',
+          'node.type.management.orderable.child.nodes.supported' => 'false',
+          'node.type.management.overrides.supported' => 'false',
+          'node.type.management.primary.item.name.supported' => 'true',
+          'node.type.management.property.types' => 'true',
+          'node.type.management.residual.definitions.supported' => 'false',
+          'node.type.management.same.name.siblings.supported' => 'false',
+          'node.type.management.update.in.use.suported' => 'false',
+          'node.type.management.value.constraints.supported' => 'false',
+          'option.access.control.supported' => 'false',
+          'option.activities.supported' => 'false',
+          'option.baselines.supported' => 'false',
+          'option.journaled.observation.supported' => 'false',
+          'option.lifecycle.supported' => 'false',
+          'option.locking.supported' => 'false',
+          'option.node.and.property.with.same.name.supported' => 'false',
+          'option.node.type.management.supported' => 'true',
+          'option.observation.supported' => 'false',
+          'option.query.sql.supported' => 'false',
+          'option.retention.supported' => 'false',
+          'option.shareable.nodes.supported' => 'false',
+          'option.simple.versioning.supported' => 'false',
+          'option.transactions.supported' => 'true',
+          'option.unfiled.content.supported' => 'true',
+          'option.update.mixin.node.types.supported' => 'true',
+          'option.update.primary.node.type.supported' => 'true',
+          'option.versioning.supported' => 'false',
+          'option.workspace.management.supported' => 'true',
+          'option.xml.export.supported' => 'false',
+          'option.xml.import.supported' => 'false',
+          'query.full.text.search.supported' => 'false',
+          'query.joins' => 'false',
+          'query.languages' => '',
+          'query.stored.queries.supported' => 'false',
+          'query.xpath.doc.order' => 'false',
+          'query.xpath.pos.index' => 'false',
+          'write.supported' => 'true',
+        );
     }
 }

@@ -119,19 +119,6 @@ $/xi";
     }
     
     /**
-     * Get the repository descriptors from the jackrabbit server
-     * This happens without login or accessing a specific workspace.
-     *
-     * @return Array with name => Value for the descriptors
-     * 
-     * @throws \PHPCR\RepositoryException if error occurs
-     */
-    public function getRepositoryDescriptors()
-    {
-        return array(); //TODO
-    }
-    
-    /**
      * Get the nodes from an array of absolute paths
      *
      * @param array $path Absolute paths to the nodes.
@@ -251,20 +238,6 @@ $/xi";
     }
 
     /**
-     * Returns node types
-     * @param array nodetypes to request
-     * @return dom with the definitions
-     * @throws \PHPCR\RepositoryException if not logged in
-     */
-    public function getNodeTypes($nodeTypes = array())
-    {
-        // TODO: Filter for the passed nodetypes
-        // TODO: Check database for user node-types.
-
-        return PHPCR2StandardNodeTypes::getNodeTypeData();
-    }
-
-    /**
      * Returns the path of all accessible REFERENCE properties in the workspace that point to the node
      *
      * @param string $path
@@ -286,23 +259,6 @@ $/xi";
     public function getWeakReferences($path, $name = null)
     {
         return $this->getNodeReferences($path, $name, true);
-    }
-
-    /**
-     * Return the permissions of the current session on the node given by path.
-     * The result of this function is an array of zero, one or more strings from add_node, read, remove, set_property.
-     *
-     * @param string $path the path to the node we want to check
-     * @return array of string
-     */
-    public function getPermissions($path)
-    {
-        return array(
-            \PHPCR\SessionInterface::ACTION_ADD_NODE,
-            \PHPCR\SessionInterface::ACTION_READ,
-            \PHPCR\SessionInterface::ACTION_REMOVE,
-            \PHPCR\SessionInterface::ACTION_SET_PROPERTY
-        );
     }
 
     /**
