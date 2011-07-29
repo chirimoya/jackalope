@@ -35,17 +35,34 @@ class Session implements \PHPCR\SessionInterface
      */
     protected $factory;
 
+    /**
+     * @var Repository
+     */
     protected $repository;
+    /**
+     * @var Workspace
+     */
     protected $workspace;
+    /**
+     * @var ObjectManager
+     */
     protected $objectManager;
     protected $utx = null;
+    /**
+     * @var \PHPCR\SimpleCredentials
+     */
     protected $credentials;
+    /**
+     * @var bool
+     */
     protected $logout = false;
     /**
      * The namespace registry.
      *
      * It is only used to check prefixes and at setup.
      * Session remapping must be handled locally.
+     *
+     * @var NamespaceRegistry
      */
     protected $namespaceRegistry;
 
@@ -65,19 +82,12 @@ class Session implements \PHPCR\SessionInterface
         $this->repository = $repository;
         $this->objectManager = $this->factory->get('ObjectManager', array($transport, $this));
         $this->workspace = $this->factory->get('Workspace', array($this, $this->objectManager, $workspaceName));
+        $this->utx = $this->workspace->getTransactionManager();
         $this->credentials = $credentials;
         $this->namespaceRegistry = $this->workspace->getNamespaceRegistry();
         self::registerSession($this);
-    }
 
-    public function setTransactionManager(\PHPCR\Transaction\UserTransactionInterface $utx)
-    {
-        $this->utx = $utx;
-    }
-
-    public function getTransactionManager()
-    {
-        return $this->utx;
+        $transport->setNodeTypeManager($this->workspace->getNodeTypeManager());
     }
 
     /**
@@ -575,7 +585,7 @@ class Session implements \PHPCR\SessionInterface
         $actualPermissions = $this->objectManager->getPermissions($absPath);
         $requestedPermissions = explode(',', $actions);
 
-        foreach($requestedPermissions as $perm) {
+        foreach ($requestedPermissions as $perm) {
             if (! in_array(strtolower(trim($perm)), $actualPermissions)) {
                 return false;
             }
@@ -706,7 +716,7 @@ class Session implements \PHPCR\SessionInterface
             fwrite($stream, '<sv:property sv:name="jcr:uuid" sv:type="String"><sv:value>'.$node->getIdentifier().'</sv:value></sv:property>');
         }
 
-        foreach($node->getProperties() as $name => $property) {
+        foreach ($node->getProperties() as $name => $property) {
             if ($name == 'jcr:primaryType' || $name == 'jcr:mixinTypes' || $name == 'jcr:uuid') {
                 // explicitly handled before
                 continue;
@@ -721,7 +731,7 @@ class Session implements \PHPCR\SessionInterface
                                 . '>');
             $values = $property->isMultiple() ? $property->getString() : array($property->getString());
 
-            foreach($values as $value) {
+            foreach ($values as $value) {
                 if (PropertyType::BINARY == $property->getType()) {
                     $val = base64_encode($value);
                 } else {
@@ -733,7 +743,7 @@ class Session implements \PHPCR\SessionInterface
             fwrite($stream, "</sv:property>");
         }
         if (! $noRecurse) {
-            foreach($node as $child) {
+            foreach ($node as $child) {
                 $this->exportSystemViewRecursive($child, $stream, $skipBinary, $noRecurse);
             }
         }
@@ -804,7 +814,7 @@ class Session implements \PHPCR\SessionInterface
         if ($root) {
             $this->exportNamespaceDeclarations($stream);
         }
-        foreach($node->getProperties() as $name => $property) {
+        foreach ($node->getProperties() as $name => $property) {
             if ($property->isMultiple()) {
                 // skip multiple properties. jackrabbit does this too. cheap but whatever. use system view for a complete export
                 continue;
@@ -823,7 +833,7 @@ class Session implements \PHPCR\SessionInterface
             fwrite($stream, '/>');
         } else {
             fwrite($stream, '>');
-            foreach($node as $child) {
+            foreach ($node as $child) {
                 $this->exportDocumentViewRecursive($child, $stream, $skipBinary, $noRecurse);
             }
             fwrite($stream, "</$nodename>");
@@ -838,7 +848,7 @@ class Session implements \PHPCR\SessionInterface
     }
     private function exportNamespaceDeclarations($stream)
     {
-        foreach($this->workspace->getNamespaceRegistry() as $key => $uri) {
+        foreach ($this->workspace->getNamespaceRegistry() as $key => $uri) {
             if (! empty($key)) { // no ns declaration for empty namespace
                 fwrite($stream, " xmlns:$key=\"$uri\"");
             }
