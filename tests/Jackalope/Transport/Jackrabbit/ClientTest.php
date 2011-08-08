@@ -1,13 +1,16 @@
 <?php
 
-namespace Jackalope\Transport\Davex;
+namespace Jackalope\Transport\Jackrabbit;
 
 use Jackalope\TestCase;
 
 use DOMDocument;
 use DOMXPath;
 
-class ClientTest extends TestCase
+/**
+ * TODO: this unit test contains some functional tests. we should separate functional and unit tests.
+ */
+class ClientTest extends DavexTestCase
 {
     public function getTransportMock($args = 'testuri', $changeMethods = array())
     {
@@ -28,7 +31,7 @@ class ClientTest extends TestCase
         array_unshift($args, $factory);
         $defaultMockMethods = array('execute', 'executeDom', 'executeJson');
         $mockMethods = array_merge(array_diff($defaultMockMethods, $changeMethods), array_diff($changeMethods, $defaultMockMethods));
-        $request = $this->getMock('Jackalope\Transport\Davex\Request', $mockMethods, $args);
+        $request = $this->getMock('Jackalope\Transport\Jackrabbit\Request', $mockMethods, $args);
 
         $request
             ->expects($this->any())
@@ -49,7 +52,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::__construct
+     * @covers \Jackalope\Transport\Jackrabbit\Client::__construct
      */
     public function testConstructor()
     {
@@ -59,18 +62,18 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::__destruct
+     * @covers \Jackalope\Transport\Jackrabbit\Client::__destruct
      */
     public function testDestructor()
     {
         $factory = new \Jackalope\Factory;
         $transport = new ClientMock($factory, 'testuri');
         $transport->__destruct();
-        $this->assertSame(null, $transport->curl);
+        $this->assertNull($transport->curl);
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getRequest
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getRequest
      */
     public function testGetRequestDoesntReinitCurl()
     {
@@ -81,7 +84,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::buildReportRequest
+     * @covers \Jackalope\Transport\Jackrabbit\Client::buildReportRequest
      */
     public function testBuildReportRequest()
     {
@@ -92,7 +95,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getRepositoryDescriptors
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getRepositoryDescriptors
      * @expectedException \PHPCR\RepositoryException
      */
     public function testGetRepositoryDescriptorsEmptyBackendResponse()
@@ -108,7 +111,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getRepositoryDescriptors
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getRepositoryDescriptors
      */
     public function testGetRepositoryDescriptors()
     {
@@ -135,7 +138,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getRequest
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getRequest
      * @expectedException \PHPCR\RepositoryException
      */
     public function testExceptionIfNotLoggedIn()
@@ -146,18 +149,18 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getRepositoryDescriptors
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getRepositoryDescriptors
      * @expectedException \PHPCR\RepositoryException
      */
     public function testGetRepositoryDescriptorsNoserver()
     {
         $factory = new \Jackalope\Factory;
-        $t = new \Jackalope\Transport\Davex\Client($factory, 'http://localhost:1/server');
+        $t = new \Jackalope\Transport\Jackrabbit\Client($factory, 'http://localhost:1/server');
         $d = $t->getRepositoryDescriptors();
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::buildPropfindRequest
+     * @covers \Jackalope\Transport\Jackrabbit\Client::buildPropfindRequest
      */
     public function testBuildPropfindRequestSingle()
     {
@@ -168,7 +171,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::buildPropfindRequest
+     * @covers \Jackalope\Transport\Jackrabbit\Client::buildPropfindRequest
      */
     public function testBuildPropfindRequestArray()
     {
@@ -179,7 +182,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::login
+     * @covers \Jackalope\Transport\Jackrabbit\Client::login
      * @expectedException \PHPCR\RepositoryException
      */
     public function testLoginAlreadyLoggedin()
@@ -190,7 +193,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::login
+     * @covers \Jackalope\Transport\Jackrabbit\Client::login
      * @expectedException \PHPCR\LoginException
      */
     public function testLoginUnsportedCredentials()
@@ -200,7 +203,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::login
+     * @covers \Jackalope\Transport\Jackrabbit\Client::login
      * @expectedException \PHPCR\RepositoryException
      */
     public function testLoginEmptyBackendResponse()
@@ -216,7 +219,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::login
+     * @covers \Jackalope\Transport\Jackrabbit\Client::login
      * @expectedException \PHPCR\RepositoryException
      */
     public function testLoginWrongWorkspace()
@@ -232,7 +235,7 @@ class ClientTest extends TestCase
     }
 
      /**
-     * @covers \Jackalope\Transport\Davex\Client::login
+     * @covers \Jackalope\Transport\Jackrabbit\Client::login
      */
     public function testLogin()
     {
@@ -259,29 +262,29 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::login
+     * @covers \Jackalope\Transport\Jackrabbit\Client::login
      * @expectedException \PHPCR\NoSuchWorkspaceException
      */
     public function testLoginNoServer()
     {
         $factory = new \Jackalope\Factory;
-        $t = new \Jackalope\Transport\Davex\Client($factory, 'http://localhost:1/server');
+        $t = new \Jackalope\Transport\Jackrabbit\Client($factory, 'http://localhost:1/server');
         $t->login($this->credentials, $this->config['workspace']);
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::login
+     * @covers \Jackalope\Transport\Jackrabbit\Client::login
      * @expectedException \PHPCR\NoSuchWorkspaceException
      */
     public function testLoginNoSuchWorkspace()
     {
         $factory = new \Jackalope\Factory;
-        $t = new \Jackalope\Transport\Davex\Client($factory, $this->config['url']);
+        $t = new \Jackalope\Transport\Jackrabbit\Client($factory, $this->config['url']);
         $t->login($this->credentials, 'not-an-existing-workspace');
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNode
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNode
      * @expectedException \PHPCR\RepositoryException
      */
     public function testGetNodeWithoutAbsPath()
@@ -291,7 +294,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNode
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNode
      */
     public function testGetNode()
     {
@@ -307,7 +310,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::buildLocateRequest
+     * @covers \Jackalope\Transport\Jackrabbit\Client::buildLocateRequest
      */
     public function testBuildLocateRequestMock()
     {
@@ -316,7 +319,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNodePathForIdentifier
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNodePathForIdentifier
      * @expectedException \PHPCR\RepositoryException
      */
     public function testGetNodePathForIdentifierEmptyResponse()
@@ -333,7 +336,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNodePathForIdentifier
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNodePathForIdentifier
      * @expectedException \PHPCR\RepositoryException
      */
     public function testGetNodePathForIdentifierWrongWorkspace()
@@ -355,7 +358,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNodePathForIdentifier
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNodePathForIdentifier
      */
     public function testGetNodePathForIdentifier()
     {
@@ -376,7 +379,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNamespaces
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNamespaces
      * @expectedException \PHPCR\RepositoryException
      */
     public function testGetNamespacesEmptyResponse()
@@ -394,7 +397,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNamespaces
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNamespaces
      */
     public function testGetNamespaces()
     {
@@ -441,7 +444,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::buildNodeTypesRequest
+     * @covers \Jackalope\Transport\Jackrabbit\Client::buildNodeTypesRequest
      */
     public function testGetAllNodeTypesRequest()
     {
@@ -450,7 +453,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::buildNodeTypesRequest
+     * @covers \Jackalope\Transport\Jackrabbit\Client::buildNodeTypesRequest
      */
     public function testSpecificNodeTypesRequest()
     {
@@ -459,7 +462,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNodeTypes
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNodeTypes
      */
     public function testGetNodeTypes()
     {
@@ -471,7 +474,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNodeTypes
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNodeTypes
      */
     public function testSpecificGetNodeTypes()
     {
@@ -485,7 +488,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getNodeTypes
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getNodeTypes
      */
     public function testEmptyGetNodeTypes()
     {
@@ -498,7 +501,7 @@ class ClientTest extends TestCase
     /** END TESTING NODE TYPES **/
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::getAccessibleWorkspaceNames
+     * @covers \Jackalope\Transport\Jackrabbit\Client::getAccessibleWorkspaceNames
      */
     public function testGetAccessibleWorkspaceNames()
     {
@@ -523,7 +526,7 @@ class ClientTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Client::addWorkspacePathToUri
+     * @covers \Jackalope\Transport\Jackrabbit\Client::addWorkspacePathToUri
      */
     public function testAddWorkspacePathToUri()
     {

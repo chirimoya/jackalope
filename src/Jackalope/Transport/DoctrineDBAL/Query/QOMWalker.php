@@ -42,11 +42,14 @@ class QOMWalker
      * @var AbstractPlatform
      */
     private $platform;
+
+    private $namespaces;
     
-    public function __construct(NodeTypeManagerInterface $manager, AbstractPlatform $platform)
+    public function __construct(NodeTypeManagerInterface $manager, AbstractPlatform $platform, array $namespaces = array())
     {
         $this->nodeTypeManager = $manager;
         $this->platform = $platform;
+        $this->namespaces = $namespaces;
     }
 
     private function getTableAlias($selectorName)
@@ -148,7 +151,7 @@ class QOMWalker
      */
     public function walkPropertyExistanceConstraint(QOM\PropertyExistenceInterface $constraint)
     {
-        return "EXTRACTVALUE(".$this->getTableAlias($constraint->getSelectorName()).".props, 'count(//sv:property[sv:name=\"".$constraint->getPropertyName() . "\"]/sv:value[1])') = 1";
+        return $this->sqlXpathValueExists($this->getTableAlias($constraint->getSelectorName()), $constraint->getPropertyName());
     }
 
     /**
@@ -256,8 +259,7 @@ class QOMWalker
             } else if ($property == "jcr:uuid") {
                 return $alias . ".identifier";
             } else {
-                // TODO: Abstract this from MySQL
-                return "EXTRACTVALUE($alias.props, '//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1]')";
+                return $this->sqlXpathExtractValue($alias, $property);
             }
         } else if ($operand instanceof QOM\LengthInterface) {
 
@@ -268,8 +270,7 @@ class QOMWalker
             } else if ($property == "jcr:uuid") {
                 return $alias . ".identifier";
             } else {
-                // TODO: Abstract this from MySQL
-                return "EXTRACTVALUE($alias.props, 'count(//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1])')";
+                return $this->sqlXpathExtractValue($alias, $property);
             }
 
         } else {
@@ -290,5 +291,47 @@ class QOMWalker
     {
         return $this->walkOperand($ordering->getOperand()) . " " .
                (($ordering->getOrder() == QOM\QueryObjectModelConstantsInterface::JCR_ORDER_ASCENDING) ? "ASC" : "DESC");
+    }
+
+    /**
+     * SQL to execute an XPATH expression checking if the property exist on the node with the given alias.
+     * 
+     * @param string $alias
+     * @param string $property
+     * @return string
+     */
+    private function sqlXpathValueExists($alias, $property)
+    {
+        if ($this->platform instanceof \Doctrine\DBAL\Platforms\MySqlPlatform) {
+            return "EXTRACTVALUE($alias.props, 'count(//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1])') = 1";
+        } else if ($this->platform instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) {
+            return "xpath_exists('//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1]', CAST($alias.props AS xml), ".$this->sqlXpathPostgreSQLNamespaces().") = 't'";
+        } else {
+            throw new \Jackalope\NotImplementedException("Xpath evaluations cannot be executed with '" . $this->platform->getName() . "' yet.");
+        }
+    }
+
+    /**
+     * SQL to execute an XPATH expression extracting the property value on the node with the given alias.
+     *
+     * @param string $alias
+     * @param string $property
+     * @return string
+     */
+    private function sqlXpathExtractValue($alias, $property)
+    {
+        if ($this->platform instanceof \Doctrine\DBAL\Platforms\MySqlPlatform) {
+            return "EXTRACTVALUE($alias.props, '//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1]')";
+        } else if ($this->platform instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) {
+            return "(xpath('//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1]/text()', CAST($alias.props AS xml), ".$this->sqlXpathPostgreSQLNamespaces()."))[1]::text";
+        } else {
+            throw new \Jackalope\NotImplementedException("Xpath evaluations cannot be executed with '" . $this->platform->getName() . "' yet.");
+        }
+    }
+
+    private function sqlXpathPostgreSQLNamespaces()
+    {
+        $namespaces = "ARRAY[ARRAY['sv', 'http://www.jcp.org/jcr/sv/1.0']]";
+        return $namespaces;
     }
 }

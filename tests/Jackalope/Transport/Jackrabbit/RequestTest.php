@@ -1,13 +1,13 @@
 <?php
 
-namespace Jackalope\Transport\Davex;
+namespace Jackalope\Transport\Jackrabbit;
 
 use Jackalope\TestCase;
 
 use DOMDocument;
 use DOMXPath;
 
-class RequestTest extends TestCase
+class RequestTest extends DavexTestCase
 {
     protected function getCurlFixture($fixture = null, $httpCode = 200, $errno = null)
     {
@@ -47,7 +47,7 @@ class RequestTest extends TestCase
     public function testExecuteDom()
     {
         $factory = new \Jackalope\Factory;
-        $request = $this->getMock('Jackalope\Transport\Davex\Request', array('execute'), array($factory, null,null,null));
+        $request = $this->getMock('Jackalope\Transport\Jackrabbit\Request', array('execute'), array($factory, null,null,null));
         $request->expects($this->once())
             ->method('execute')
             ->will($this->returnValue('<xml/>'));
@@ -56,7 +56,7 @@ class RequestTest extends TestCase
     }
 
     /**
-     * @covers \Jackalope\Transport\Davex\Request::execute
+     * @covers \Jackalope\Transport\Jackrabbit\Request::execute
      */
     public function testPrepareRequestWithCredentials()
     {

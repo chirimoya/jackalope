@@ -9,21 +9,29 @@ use PHPCR\RepositoryFactoryInterface;
  *
  * Use repository factory based on parameters (the parameters below are examples):
  *
- *    $factory = new \Jackalope\RepositoryFactoryDoctrineDBAL;
- *
  *    $parameters = array('jackalope.doctrine_dbal_connection' => $dbConn);
- *    $repo = $factory->getRepository($parameters);
+ *    $repo = \Jackalope\RepositoryFactoryDoctrineDBAL::getRepository($parameters);
  *
  * @api
  */
 class RepositoryFactoryDoctrineDBAL implements RepositoryFactoryInterface
 {
-    // TODO: would be nice if alternatively one could also specify the parameters to let the factory build the connection
-    private $required = array(
+    /**
+     * TODO: would be nice if alternatively one could also specify the parameters to let the factory build the connection
+     * @var array
+     */
+    static private $required = array(
         'jackalope.doctrine_dbal_connection' => 'Doctrine\DBAL\Connection (required): connection instance',
     );
-    private $optional = array(
+
+    /**
+     * @var array
+     */
+    static private $optional = array(
         'jackalope.factory' => 'string or object: Use a custom factory class for Jackalope objects',
+        'jackalope.check_login_on_server' => 'boolean: If to check if an initial PROPFIND should be send to check if repository exist',
+        'jackalope.disable_transactions' => 'boolean: if set and not empty, transactions are disabled, otherwise transactions are enabled',
+        'jackalope.disable_stream_wrapper' => 'boolean: if set and not empty, stream wrapper is disabled, otherwise the stream wrapper is enabled',
     );
 
     /**
@@ -39,11 +47,21 @@ class RepositoryFactoryDoctrineDBAL implements RepositoryFactoryInterface
      * @throws \PHPCR\RepositoryException if no suitable repository is found or another error occurs.
      * @api
      */
-    function getRepository(array $parameters = null) {
+    static public function getRepository(array $parameters = null)
+    {
         if (null === $parameters) {
             return null;
         }
-        // TODO: check if all required parameters specified
+
+        // check if we have all required keys
+        $present = array_intersect_key(self::$required, $parameters);
+        if (count(array_diff_key(self::$required, $present))) {
+            return null;
+        }
+        $defined = array_intersect_key(array_merge(self::$required, self::$optional), $parameters);
+        if (count(array_diff_key($defined, $parameters))) {
+            return null;
+        }
 
         if (isset($parameters['jackalope.factory'])) {
             $factory = is_object($parameters['jackalope.factory']) ?
@@ -56,9 +74,13 @@ class RepositoryFactoryDoctrineDBAL implements RepositoryFactoryInterface
         $dbConn = $parameters['jackalope.doctrine_dbal_connection'];
 
         $transport = $factory->get('Jackalope\Transport\DoctrineDBAL\Client', array($dbConn));
+        if (isset($parameters['jackalope.check_login_on_server'])) {
+            $transport->setCheckLoginOnServer($parameters['jackalope.check_login_on_server']);
+        }
 
-        $transactions = !empty($parameters['jackalope.transactions']);
-        return new Repository($factory, $transport, $transactions);
+        $options['transactions'] = empty($parameters['jackalope.disable_transactions']);
+        $options['stream_wrapper'] = empty($parameters['jackalope.disable_stream_wrapper']);
+        return new Repository($factory, $transport, $options);
     }
 
     /**
@@ -69,7 +91,8 @@ class RepositoryFactoryDoctrineDBAL implements RepositoryFactoryInterface
      *
      * @return array hash map of configuration key => english description
      */
-    function getConfigurationKeys() {
-        return array_merge($this->required, $this->optional);
+    static public function getConfigurationKeys()
+    {
+        return array_merge(self::$required, self::$optional);
     }
 }

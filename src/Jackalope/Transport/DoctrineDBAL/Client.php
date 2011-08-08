@@ -1,7 +1,7 @@
 <?php
 
 /**
- * Class to handle the communication between Jackalope and Jackrabbit via Davex.
+ * Class to handle the communication between Jackalope and RDBMS via Doctrine DBAL.
  *
  * @license http://www.apache.org/licenses/LICENSE-2.0  Apache License Version 2.0, January 2004
  *   Licensed under the Apache License, Version 2.0 (the "License") {}
@@ -23,12 +23,15 @@
 namespace Jackalope\Transport\DoctrineDBAL;
 
 use PHPCR\PropertyType;
-use Jackalope\TransportInterface;
 use PHPCR\RepositoryException;
-use Doctrine\DBAL\Connection;
 use PHPCR\Util\UUIDHelper;
+use Doctrine\DBAL\Connection;
+use Doctrine\Common\Cache\Cache;
+use Doctrine\Common\Cache\ArrayCache;
+use Jackalope\TransportInterface;
 use Jackalope\NodeType\NodeTypeManager;
 use Jackalope\NodeType\PHPCR2StandardNodeTypes;
+
 /**
  * @author Benjamin Eberlei <kontakt@beberlei.de>
  */
@@ -102,11 +105,33 @@ class Client implements TransportInterface
      */
     private $indexes;
 
-    public function __construct($factory, Connection $conn, array $indexes = array())
+    /**
+     * @var string|null
+     */
+    private $sequenceWorkspaceName;
+    /**
+     * @var string|null
+     */
+    private $sequenceNodeName;
+    /**
+     * @var string|null
+     */
+    private $sequenceTypeName;
+
+    /**
+     * @var Doctrine\Common\Cache\Cache
+     */
+    private $cache;
+
+    public function __construct($factory, Connection $conn, array $indexes = array(), Cache $cache = null)
     {
         $this->factory = $factory;
         $this->conn = $conn;
         $this->indexes = $indexes;
+        $this->sequenceWorkspaceName = ($conn->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) ? 'phpcr_workspaces_id_seq' : null;
+        $this->sequenceNodeName = ($conn->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) ? 'phpcr_nodes_id_seq' : null;
+        $this->sequenceTypeName = ($conn->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) ? 'phpcr_type_nodes_id_seq' : null;
+        $this->cache = $cache ?: new ArrayCache();
     }
 
     /**
@@ -151,7 +176,10 @@ class Client implements TransportInterface
             throw new \PHPCR\RepositoryException("Workspace '" . $name . "' already exists");
         }
         $this->conn->insert('phpcr_workspaces', array('name' => $name));
-        $workspaceId = $this->conn->lastInsertId();
+        $workspaceId = $this->conn->lastInsertId($this->sequenceWorkspaceName);
+        if (!$workspaceId) {
+            throw new \PHPCR\RepositoryException("Workspace creation fails.");
+        }
 
         $this->conn->insert("phpcr_nodes", array(
             'path'          => '/',
@@ -455,7 +483,7 @@ class Client implements TransportInterface
                     'props'         => $propsData['dom']->saveXML(),
                 ));
 
-                $nodeId = $this->conn->lastInsertId();
+                $nodeId = $this->conn->lastInsertId($this->sequenceNodeName);
             } else {
                 $this->conn->update('phpcr_nodes', array(
                     'props' => $propsData['dom']->saveXML(),
@@ -916,18 +944,26 @@ class Client implements TransportInterface
         return $parent;
     }
 
-    private function validateNode(\PHPCR\NodeInterface $node, \PHPCR\NodeType\NodeTypeDefinitionInterface $def)
+    /**
+     * @param \PHPCR\NodeInterface $node
+     * @param \PHPCR\NodeType\NodeTypeDefinitionInterface $def
+     */
+    private function validateNode($node, $def)
     {
         foreach ($def->getDeclaredChildNodeDefinitions() AS $childDef) {
             /* @var $childDef \PHPCR\NodeType\NodeDefinitionInterface */
             if (!$node->hasNode($childDef->getName())) {
+                if ($childDef->getName() === '*') {
+                    continue;
+                }
+
                 if ($childDef->isMandatory() && !$childDef->isAutoCreated()) {
                     throw new \PHPCR\RepositoryException(
                         "Child " . $child->getName() . " is mandatory, but is not present while ".
                         "saving " . $def->getName() . " at " . $node->getPath()
                     );
                 } else if ($childDef->isAutoCreated()) {
-
+                    throw new \Jackalope\NotImplementedException("Auto-creation of child node '".$def->getName()."#".$childDef->getName()."' is not yet supported in DoctrineDBAL transport.");
                 }
 
                 if ($node->hasProperty($childDef->getName())) {
@@ -947,6 +983,14 @@ class Client implements TransportInterface
             }
 
             if (!$node->hasProperty($propertyDef->getName())) {
+                if ($node->hasNode($propertyDef->getName())) {
+                    throw new \PHPCR\RepositoryException(
+                        "Node " . $node->getPath() . " has child with name ".
+                        $propertyDef->getName() . " but its node type '". $def->getName() . "' defines a ".
+                        "property with this name."
+                    );
+                }
+
                 if ($propertyDef->isMandatory() && !$propertyDef->isAutoCreated()) {
                     throw new \PHPCR\RepositoryException(
                         "Property " . $propertyDef->getName() . " is mandatory, but is not present while ".
@@ -960,16 +1004,23 @@ class Client implements TransportInterface
                         $propertyDef->getRequiredType()
                     );
                 }
-
-                if ($node->hasNode($propertyDef->getName())) {
-                    throw new \PHPCR\RepositoryException(
-                        "Node " . $node->getPath() . " has child with name ".
-                        $propertyDef->getName() . " but its node type '". $def->getName() . "' defines a ".
-                        "property with this name."
-                    );
-                }
             }
         }
+    }
+
+    private function getResponsibleNodeTypes($node)
+    {
+        // This is very slow i believe :-(
+        $nodeDef = $node->getPrimaryNodeType();
+        $nodeTypes = $node->getMixinNodeTypes();
+        array_unshift($nodeTypes, $nodeDef);
+        foreach ($nodeTypes as $nodeType) {
+            /* @var $nodeType \PHPCR\NodeType\NodeTypeDefinitionInterface */
+            foreach ($nodeType->getDeclaredSupertypes() AS $superType) {
+                $nodeTypes[] = $superType;
+            }
+        }
+        return $nodeTypes;
     }
 
     /**
@@ -988,31 +1039,10 @@ class Client implements TransportInterface
         $path = $node->getPath();
         $this->assertLoggedIn();
 
-        // This is very slow i believe :-(
-        $nodeDef = $node->getPrimaryNodeType();
-        $nodeTypes = $node->getMixinNodeTypes();
-        array_unshift($nodeTypes, $nodeDef);
-        foreach ($nodeTypes as $nodeType) {
-            /* @var $nodeType \PHPCR\NodeType\NodeTypeDefinitionInterface */
-            foreach ($nodeType->getDeclaredSupertypes() AS $superType) {
-                $nodeTypes[] = $superType;
-            }
-        }
-
+        $nodeTypes = $this->getResponsibleNodeTypes($node);
         $popertyDefs = array();
         foreach ($nodeTypes AS $nodeType) {
             /* @var $nodeType \PHPCR\NodeType\NodeTypeDefinitionInterface */
-            foreach ($nodeType->getDeclaredPropertyDefinitions() AS $itemDef) {
-                /* @var $itemDef \PHPCR\NodeType\ItemDefinitionInterface */
-                if ($itemDef->getName() == '*') {
-                    continue;
-                }
-
-                if (isset($popertyDefs[$itemDef->getName()])) {
-                    throw new \PHPCR\RepositoryException("DoctrineTransport does not support child/property definitions for the same subpath.");
-                }
-                $popertyDefs[$itemDef->getName()] = $itemDef;
-            }
             $this->validateNode($node, $nodeType);
         }
 
@@ -1121,16 +1151,103 @@ $/xi";
     {
         $nodeTypes = array_flip($nodeTypes);
 
-        // TODO: Filter for the passed nodetypes
-        // TODO: Check database for user node-types.
         $data = PHPCR2StandardNodeTypes::getNodeTypeData();
         $filteredData = array();
         foreach ($data AS $nodeTypeData) {
             if (isset($nodeTypes[$nodeTypeData['name']])) {
-                $filteredData[] = $nodeTypeData;
+                $filteredData[$nodeTypeData['name']] = $nodeTypeData;
             }
         }
-        return $filteredData;
+
+        foreach ($nodeTypes AS $type => $val) {
+            if (!isset($filteredData[$type]) && $result = $this->fetchUserNodeType($type)) {
+                $filteredData[$type] = $result;
+            }
+        }
+
+        return array_values($filteredData);
+    }
+
+    /**
+     * Fetch a user-defined node-type definition.
+     * 
+     * @param string $name
+     * @return array
+     */
+    private function fetchUserNodeType($name)
+    {
+        if ($result = $this->cache->fetch('phpcr_nodetype_' . $name)) {
+            return $result;
+        }
+
+        $query = "SELECT * FROM phpcr_type_nodes WHERE name = ?";
+        $data = $this->conn->fetchAssoc($query, array($name));
+
+        if (!$data) {
+            $this->cache->save('phpcr_nodetype_' . $name, false);
+            return false;
+        }
+
+        $result = array(
+            'name' => $data['name'],
+            'isAbstract' => (bool)$data['is_abstract'],
+            'isMixin' => (bool)($data['is_mixin']),
+            'isQueryable' => (bool)$data['is_queryable'],
+            'hasOrderableChildNodes' => (bool)$data['orderable_child_nodes'],
+            'primaryItemName' => $data['primary_item'],
+            'declaredSuperTypeNames' => array_filter(explode(' ', $data['supertypes'])),
+            'declaredPropertyDefinitions' => array(),
+            'declaredNodeDefinitions' => array(),
+        );
+
+        $query = "SELECT * FROM phpcr_type_props WHERE node_type_id = ?";
+        $props = $this->conn->fetchAll($query, array($data['node_type_id']));
+
+        foreach ($props AS $propertyData) {
+            $result['declaredPropertyDefinitions'][] = array(
+                'declaringNodeType' => $data['name'],
+                'name' => $propertyData['name'],
+                'isAutoCreated' => (bool)$propertyData['auto_created'],
+                'isMandatory' => (bool)$propertyData['mandatory'],
+                'isProtected' => (bool)$propertyData['protected'],
+                'onParentVersion' => $propertyData['on_parent_version'],
+                'requiredType' => $propertyData['required_type'],
+                'multiple' => (bool)$propertyData['multiple'],
+                'isFulltextSearchable' => (bool)$propertyData['fulltext_searchable'],
+                'isQueryOrderable' => (bool)$propertyData['query_orderable'],
+                'queryOperators' => array (
+                  0 => 'jcr.operator.equal.to',
+                  1 => 'jcr.operator.not.equal.to',
+                  2 => 'jcr.operator.greater.than',
+                  3 => 'jcr.operator.greater.than.or.equal.to',
+                  4 => 'jcr.operator.less.than',
+                  5 => 'jcr.operator.less.than.or.equal.to',
+                  6 => 'jcr.operator.like',
+                ),
+                'defaultValue' => array($propertyData['default_value']),
+            );
+        }
+
+        $query = "SELECT * FROM phpcr_type_childs WHERE node_type_id = ?";
+        $childs = $this->conn->fetchAll($query, array($data['node_type_id']));
+
+        foreach ($childs AS $childData) {
+            $result['declaredNodeDefinitions'][] = array(
+                'declaringNodeType' => $data['name'],
+                'name' => $childData['name'],
+                'isAutoCreated' => (bool)$childData['auto_created'],
+                'isMandatory' => (bool)$childData['mandatory'],
+                'isProtected' => (bool)$childData['protected'],
+                'onParentVersion' => $childData['on_parent_version'],
+                'allowsSameNameSiblings' => false,
+                'defaultPrimaryTypeName' => $childData['default_type'],
+                'requiredPrimaryTypeNames' => array_filter(explode(" ", $childData['primary_types'])),
+            );
+        }
+
+        $this->cache->save('phpcr_nodetype_' . $name, $result);
+
+        return $result;
     }
 
     /**
@@ -1155,7 +1272,55 @@ $/xi";
      */
     public function registerNodeTypes($types, $allowUpdate)
     {
-        throw new \Jackalope\NotImplementedException("Not implemented yet");
+        foreach ($types AS $type) {
+            /* @var $type \Jackalope\NodeType\NodeTypeDefinition */
+            $this->conn->insert('phpcr_type_nodes', array(
+                'name' => $type->getName(),
+                'supertypes' => implode(' ', $type->getDeclaredSuperTypeNames()),
+                'is_abstract' => $type->isAbstract() ? 1 : 0,
+                'is_mixin' => $type->isMixin() ? 1 : 0,
+                'queryable' => $type->isQueryable() ? 1 : 0,
+                'orderable_child_nodes' => $type->hasOrderableChildNodes() ? 1 : 0,
+                'primary_item' => $type->getPrimaryItemName(),
+            ));
+            $nodeTypeId = $this->conn->lastInsertId($this->sequenceTypeName);
+
+            if ($propDefs = $type->getDeclaredPropertyDefinitions()) {
+                foreach ($propDefs AS $propertyDef) {
+                    /* @var $propertyDef \Jackalope\NodeType\PropertyDefinition */
+                    $this->conn->insert('phpcr_type_props', array(
+                        'node_type_id' => $nodeTypeId,
+                        'name' => $propertyDef->getName(),
+                        'protected' => $propertyDef->isProtected(),
+                        'mandatory' => $propertyDef->isMandatory(),
+                        'auto_created' => $propertyDef->isAutoCreated(),
+                        'on_parent_version' => $propertyDef->getOnParentVersion(),
+                        'multiple' => $propertyDef->isMultiple(),
+                        'fulltext_searchable' => $propertyDef->isFullTextSearchable(),
+                        'query_orderable' => $propertyDef->isQueryOrderable(),
+                        'required_type' => $propertyDef->getRequiredType(),
+                        'query_operators' => 0, // transform to bitmask
+                        'default_value' => $propertyDef->getDefaultValues() ? current($propertyDef->getDefaultValues()) : null,
+                    ));
+                }
+            }
+
+            if ($childDefs = $type->getDeclaredChildNodeDefinitions()) {
+                foreach ($childDefs AS $childDef) {
+                    /* @var $propertyDef \PHPCR\NodeType\NodeDefinitionInterface */
+                    $this->conn->insert('phpcr_type_childs', array(
+                        'node_type_id' => $nodeTypeId,
+                        'name' => $childDef->getName(),
+                        'protected' => $childDef->isProtected(),
+                        'mandatory' => $childDef->isMandatory(),
+                        'auto_created' => $childDef->isAutoCreated(),
+                        'on_parent_version' => $childDef->getOnParentVersion(),
+                        'primary_types' => implode(' ', $childDef->getRequiredPrimaryTypeNames() ?: array()),
+                        'default_type' => $childDef->getDefaultPrimaryTypeName(),
+                    ));
+                }
+            }
+        }
     }
 
     public function setNodeTypeManager($nodeTypeManager)
@@ -1208,7 +1373,7 @@ $/xi";
                 $parser = new \PHPCR\Util\QOM\Sql2ToQomQueryConverter(new \Jackalope\Query\QOM\QueryObjectModelFactory());
                 $qom = $parser->parse($query->getStatement());
 
-                $qomWalker = new Query\QOMWalker($this->nodeTypeManager, $this->conn->getDatabasePlatform());
+                $qomWalker = new Query\QOMWalker($this->nodeTypeManager, $this->conn->getDatabasePlatform(), $this->getNamespaces());
                 $sql = $qomWalker->walkQOMQuery($qom);
 
                 $sql = $this->conn->getDatabasePlatform()->modifyLimitQuery($sql, $limit, $offset);
