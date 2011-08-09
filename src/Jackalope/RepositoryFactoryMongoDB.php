@@ -18,12 +18,14 @@ use PHPCR\RepositoryFactoryInterface;
  */
 class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
 {
-    private $required = array(
+    static private $required = array(
         'jackalope.mongodb_database' => '\Doctrine\MongoDB\Database (required): mongodb database instance',
     );
-    private $optional = array(
+    
+    static private $optional = array(
         'jackalope.factory' => 'string or object: Use a custom factory class for Jackalope objects',
-    	'jackalope.disable_transactions' => 'boolean: if set and not empty, transactions are disabled, otherwise transactions are enabled',
+        'jackalope.disable_transactions' => 'boolean: If set and not empty, transactions are disabled, otherwise transactions are enabled',
+        'jackalope.disable_stream_wrapper' => 'boolean: If set and not empty, stream wrapper is disabled, otherwise the stream wrapper is enabled',
     );
 
     /**
@@ -39,17 +41,18 @@ class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
      * @throws \PHPCR\RepositoryException if no suitable repository is found or another error occurs.
      * @api
      */
-    function getRepository(array $parameters = null) {
+    static public function getRepository(array $parameters = null) 
+    {
         if (null == $parameters) {
             return null;
         }
         
         // check if we have all required keys
-        $present = array_intersect_key($this->required, $parameters);
-        if (count(array_diff_key($this->required, $present))) {
+        $present = array_intersect_key(self::$required, $parameters);
+        if (count(array_diff_key(self::$required, $present))) {
             return null;
         }
-        $defined = array_intersect_key(array_merge($this->required, $this->optional), $parameters);
+        $defined = array_intersect_key(array_merge(self::$required, self::$optional), $parameters);
         if (count(array_diff_key($defined, $parameters))) {
             return null;
         }
@@ -66,8 +69,9 @@ class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
 
         $transport = $factory->get('Transport\MongoDB\Client', array($db));
        
-        $transactions = empty($parameters['jackalope.disable_transactions']);
-        return new Repository($factory, $transport, $transactions);
+        $options['transactions'] = empty($parameters['jackalope.disable_transactions']);
+        $options['stream_wrapper'] = empty($parameters['jackalope.disable_stream_wrapper']);
+        return new Repository($factory, $transport, $options);
     }
 
     /**
@@ -78,7 +82,8 @@ class RepositoryFactoryMongoDB implements RepositoryFactoryInterface
      *
      * @return array hash map of configuration key => english description
      */
-    function getConfigurationKeys() {
-        return array_merge($this->required, $this->optional);
+    static public function getConfigurationKeys()
+    {
+        return array_merge(self::$required, self::$optional);
     }
 }
