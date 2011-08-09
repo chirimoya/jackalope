@@ -1,0 +1,49 @@
+<phpunit backupGlobals="false"
+         backupStaticAttributes="false"
+         colors="false"
+         convertErrorsToExceptions="true"
+         convertNoticesToExceptions="true"
+         convertWarningsToExceptions="true"
+         processIsolation="false"
+         stopOnFailure="false"
+         syntaxCheck="false"
+         bootstrap="bootstrap_mongodb.php">
+    <php>
+        <var name="phpcr.user" value="admin" />
+        <var name="phpcr.pass" value="admin" />
+        <var name="phpcr.workspace" value="tests" />
+        <var name="phpcr.transport" value="mongodb" />
+        <!-- Path to MongoDB stuff for transport -->
+        <var name="phpcr.doctrine.loader" value="/path/to/Doctrine/Common/lib/Doctrine/Common/ClassLoader.php" />
+        <var name="phpcr.doctrine.commondir" value="/path/to/Doctrine/Common/lib" />
+        <var name="phpcr.doctrine.mongodbdir" value="/path/to/Doctrine/mongodb/lib" />
+        <var name="phpcr.doctrine.mongodb.server" value="mongodb://localhost" />
+        <var name="phpcr.doctrine.mongodb.dbname" value="phpcr_tests" />
+    </php>
+
+   <testsuites>
+        <testsuite name="Jackalope MongoDB Tests">
+            <directory>.</directory>
+        </testsuite>
+    </testsuites>
+
+    <!-- configuration for code coverage report -->
+    <filter>
+        <whitelist>
+            <directory>../src</directory>
+            <directory>../lib/phpcr</directory>
+
+            <exclude>
+                <!-- ignore helpers -->
+                <file>../src/Jackalope/autoloader.php</file>
+                <file>../src/Jackalope/Transport/curl.php</file>
+
+                <!-- ignore whats not implemented yet -->
+                <directory>../lib/phpcr/src/PHPCR/Lock</directory>
+                <directory>../lib/phpcr/src/PHPCR/Observation</directory>
+                <directory>../lib/phpcr/src/PHPCR/Retention</directory>
+                <directory>../lib/phpcr/src/PHPCR/Security</directory>
+            </exclude>
+        </whitelist>
+    </filter>
+</phpunit>

@@ -7,7 +7,7 @@
 
 require_once __DIR__ . "/../lib/phpcr/src/PHPCR/Util/UUIDHelper.php";
 
-$srcDir = __DIR__ . "/suite/fixtures";
+$srcDir = __DIR__ . "/phpcr-api/fixtures";
 $destDir = __DIR__ . "/fixtures/mongodb";
 
 $jcrTypes = array(
