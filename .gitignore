@@ -9,6 +9,8 @@ doc/html
 
 /tests/phpunit_jackrabbit.xml
 /tests/phpunit_doctrinedbal.xml
+/tests/phpunit_mongodb.xml
 /tests/fixtures/doctrine
+/tests/fixtures/mongodb
 /tests/phpunit.xml
 

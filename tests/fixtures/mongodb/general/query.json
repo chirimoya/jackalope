@@ -1,1 +1,0 @@
-[{"_id":{"$binary":"NDU4MGRiOWUtZGZjZC00ZmQwLWJjMzctMzFhZDY4OTFhZmUz","$type":"03"},"path":"\/queryNode","parent":"\/","w_id":{"$oid":"4e00e8fea381601b08000000"},"type":"nt:query","props":[{"name":"jcr:language","type":"String","value":"xpath","multi":false},{"name":"jcr:statement","type":"String","value":"\/\/idExample[jcr:mimeType=\"text\/plain\"]","multi":false}]}]
