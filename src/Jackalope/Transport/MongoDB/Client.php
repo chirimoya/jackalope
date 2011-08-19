@@ -1084,9 +1084,6 @@ class Client extends ClientAbstract implements TransportInterface
                 $result = array();
                 
                 foreach ($nodes AS $node) {
-                    
-                    var_dump($node);
-                
                     $result[] = array(
                         array('dcr:name' => 'jcr:primaryType', 'dcr:value' => $node['type']),
                         array('dcr:name' => 'jcr:path', 'dcr:value' => $node['path'], 'dcr:selectorName' => $node['type']),
