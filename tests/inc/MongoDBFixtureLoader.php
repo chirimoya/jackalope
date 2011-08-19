@@ -2,7 +2,7 @@
 require_once __DIR__.'/../phpcr-api/inc/FixtureLoaderInterface.php';
 
 /**
- * Import fixtures into the doctrine dbal backend of jackalope
+ * Import fixtures into the mongodb backend of jackalope
  */
 class MongoDBFixtureLoader implements \PHPCR\Test\FixtureLoaderInterface
 {

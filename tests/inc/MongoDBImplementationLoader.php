@@ -3,7 +3,7 @@
 require_once __DIR__.'/../phpcr-api/inc/AbstractLoader.php';
 
 /**
- * Implementation loader for jackalope-doctrine-dbal
+ * Implementation loader for jackalope-mongodb
  */
 class ImplementationLoader extends \PHPCR\Test\AbstractLoader
 {
@@ -23,6 +23,9 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
         parent::__construct('Jackalope\RepositoryFactoryMongoDB');
 
         $this->unsupportedChapters = array(
+                    'Query',
+                    'Export',
+                    'NodeTypeDiscovery',
                     'PermissionsAndCapabilities',
                     'Import',
                     'Observation',
@@ -32,15 +35,14 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
                     'AccessControlManagement',
                     'Locking',
                     'LifecycleManagement',
+                    'NodeTypeManagement',
                     'RetentionAndHold',
                     'Transactions',
                     'SameNameSiblings',
                     'OrderableChildNodes',
         );
 
-        $this->unsupportedCases = array(
-                    'Writing\\MoveMethodsTest',
-        );
+        $this->unsupportedCases = array();
 
         $this->unsupportedTests = array(
                     'Connecting\\RepositoryTest::testLoginException', //TODO: figure out what would be invalid credentials
@@ -50,9 +52,19 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
                     'Reading\\SessionReadMethodsTest::testImpersonate', //TODO: Check if that's implemented in newer jackrabbit versions.
                     'Reading\\SessionNamespaceRemappingTest::testSetNamespacePrefix',
                     'Reading\\NodeReadMethodsTest::testGetSharedSetUnreferenced', // TODO: should this be moved to 14_ShareableNodes
+        
+                    // TODO mongodb specific fixer-loading problem with binaries
+                    'Reading\\BinaryReadMethodsTest::testReadBinaryValue',
+                    'Reading\\BinaryReadMethodsTest::testIterateBinaryValue',
+                    'Reading\\BinaryReadMethodsTest::testReadBinaryValueAsString',
+                    'Reading\\BinaryReadMethodsTest::testReadBinaryValues',
+                    'Reading\\BinaryReadMethodsTest::testReadBinaryValuesAsString',
+                    'Reading\\PropertyReadMethodsTest::testGetBinary',
+                    'Reading\\PropertyReadMethodsTest::testGetBinaryMulti',
 
                     'Query\QueryManagerTest::testGetQuery',
                     'Query\QueryManagerTest::testGetQueryInvalid',
+                    'Query\\NodeViewTest::testSeekable',
 
                     'Writing\\NamespaceRegistryTest::testRegisterUnregisterNamespace',
                     'Writing\\CopyMethodsTest::testCopyUpdateOnCopy',
