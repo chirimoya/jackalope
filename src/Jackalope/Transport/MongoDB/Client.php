@@ -521,7 +521,7 @@ class Client extends ClientAbstract implements TransportInterface
         } else {
         
             //TODO check subnode references!
-            if(count($this->getReferences($path)) > 0 || count($this->getWeakReferences($path)) > 0){
+            if(count($this->getReferences($path)) > 0){
                 throw new \PHPCR\ReferentialIntegrityException(
                     "Cannot delete item at path '".$path."', there is at least one item with ".
                     "a reference to this or a subnode of the path."
@@ -1089,16 +1089,33 @@ class Client extends ClientAbstract implements TransportInterface
     {
         $nodeTypes = array_flip($nodeTypes);
 
-        // TODO: Filter for the passed nodetypes
-        // TODO: Check database for user node-types.
         $data = PHPCR2StandardNodeTypes::getNodeTypeData();
         $filteredData = array();
         foreach ($data AS $nodeTypeData) {
             if (isset($nodeTypes[$nodeTypeData['name']])) {
-                $filteredData[] = $nodeTypeData;
+                $filteredData[$nodeTypeData['name']] = $nodeTypeData;
             }
         }
-        return $filteredData;
+
+        foreach ($nodeTypes AS $type => $val) {
+            if (!isset($filteredData[$type]) && $result = $this->fetchUserNodeType($type)) {
+                $filteredData[$type] = $result;
+            }
+        }
+
+        return array_values($filteredData);
+    }
+    
+		/**
+     * Fetch a user-defined node-type definition.
+     *
+     * @param string $name
+     * @return array
+     */
+    private function fetchUserNodeType($name)
+    {
+        //TODO  
+        return array();
     }
 
     /**
