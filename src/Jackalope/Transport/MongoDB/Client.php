@@ -1033,9 +1033,73 @@ class Client extends ClientAbstract implements TransportInterface
         throw new \Jackalope\NotImplementedException("Not implemented yet");
     }
 
+    /**
+     * Search something with the backend.
+     *
+     * The language must be among those returned by getSupportedQueryLanguages
+     *
+     * Implementors: Expose all information required by the transport layers to
+     * execute the query with getters.
+     *
+     * array(
+     *     //row 1
+     *     array(
+     *         //column1
+     *         array('dcr:name' => 'value1',
+     *               'dcr:value' => 'value2',
+     *               'dcr:selectorName' => 'value3' //optional
+     *         ),
+     *         //column 2...
+     *     ),
+     *     //row 2
+     *     array(...
+     * )
+     *
+     * @param \PHPCR\Query\QueryInterface $query the query object
+     * @return array data with search result. TODO: what to return? should be some simple array
+     * @see Query\QueryResult::__construct for the xml format. TODO: have the transport return a QueryResult?
+     */
     public function query(\PHPCR\Query\QueryInterface $query)
     {
-        throw new \Jackalope\NotImplementedException("Not implemented yet");
+        $limit = $query->getLimit();
+        $offset = $query->getOffset();
+
+        switch ($query->getLanguage()) {
+            case \PHPCR\Query\QueryInterface::JCR_SQL2:
+                $parser = new \PHPCR\Util\QOM\Sql2ToQomQueryConverter(new \Jackalope\Query\QOM\QueryObjectModelFactory());
+                $qom = $parser->parse($query->getStatement());
+               
+                $coll = $this->db->selectCollection(self::COLLNAME_NODES);
+                $qb = $coll->createQueryBuilder();
+                           
+                $qomWalker = new Query\QOMWalker($this->nodeTypeManager, $qb, $this->getNamespaces());
+                $qomWalker->walkQOMQuery($qom);
+                
+                $nodes = $qb->field('w_id')->equals($this->workspaceId)
+                            ->limit($limit)
+                            ->skip($offset)
+                            ->getQuery()
+                            ->getIterator();
+                            
+                $result = array();
+                
+                foreach ($nodes AS $node) {
+                    
+                    var_dump($node);
+                
+                    $result[] = array(
+                        array('dcr:name' => 'jcr:primaryType', 'dcr:value' => $node['type']),
+                        array('dcr:name' => 'jcr:path', 'dcr:value' => $node['path'], 'dcr:selectorName' => $node['type']),
+                        array('dcr:name' => 'jcr:score', 'dcr:value' => 0)
+                    );
+                }
+
+                return $result;
+            case \PHPCR\Query\QueryInterface::JCR_JQOM:
+                // How do we extrct the QOM from a QueryInterface? We need a non-interface method probably
+                throw new \Jackalope\NotImplementedException("JCQ-JQOM not yet implemented.");
+                break;
+        }
     }
 
     /**
