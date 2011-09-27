@@ -31,6 +31,7 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
 
         $this->unsupportedCases = array(
                     'Writing\\MoveMethodsTest',
+                    'Writing\\NodeTypePreemptiveValidationTest', // TODO: some of this could work, test it and make all work
         );
 
         $this->unsupportedTests = array(
@@ -47,6 +48,9 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
 
                     'Writing\\NamespaceRegistryTest::testRegisterUnregisterNamespace',
                     'Writing\\CopyMethodsTest::testCopyUpdateOnCopy',
+                    'Writing\\MoveMethodsTest::testNodeOrderBeforeEnd',
+                    'Writing\\MoveMethodsTest::testNodeOrderBeforeDown',
+                    'Writing\\MoveMethodsTest::testNodeOrderBeforeUp',
         );
 
     }
@@ -65,11 +69,13 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
         return array('jackalope.doctrine_dbal_connection' => $dbConn);
     }
 
-    public function getCredentials() {
+    public function getCredentials()
+    {
         return new \PHPCR\SimpleCredentials($GLOBALS['phpcr.user'], $GLOBALS['phpcr.pass']);
     }
 
-    public function getInvalidCredentials() {
+    public function getInvalidCredentials()
+    {
         return new \PHPCR\SimpleCredentials('nonexistinguser', '');
     }
 

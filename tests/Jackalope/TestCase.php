@@ -44,19 +44,22 @@ abstract class TestCase extends \PHPUnit_Framework_TestCase
     protected function getSessionMock()
     {
         $factory = new \Jackalope\Factory;
-        $mock = $this->getMock('\Jackalope\Session', array('getWorkspace'), array($factory), '', false);
+        $mock = $this->getMock('\Jackalope\Session', array('getWorkspace', 'getRepository'), array($factory), '', false);
         $mock->expects($this->any())
              ->method('getWorkspace')
              ->will($this->returnValue($this->getWorkspaceMock()));
+        $mock->expects($this->any())
+             ->method('getRepository')
+             ->will($this->returnValue($this->getRepositoryMock()));
         return $mock;
     }
 
     protected function getWorkspaceMock()
     {
         $factory = new \Jackalope\Factory;
-        $mock = $this->getMock('\Jackalope\Session', array('getTransactionManager'), array($factory), '', false);
+        $mock = $this->getMock('\Jackalope\Workspace', array('getTransactionManager'), array($factory), '', false);
         $mock->expects($this->any())
-             ->method('getWorkspace')
+             ->method('getTransactionManager')
              ->will($this->returnValue($this->getInactiveTransactionMock()));
         return $mock;
     }
@@ -68,6 +71,20 @@ abstract class TestCase extends \PHPUnit_Framework_TestCase
         $mock->expects($this->any())
              ->method('inTransaction')
              ->will($this->returnValue(false));
+        return $mock;
+    }
+
+    protected function getRepositoryMock()
+    {
+        $factory = new \Jackalope\Factory;
+        $mock = $this->getMock('\Jackalope\Repository', array(), array($factory, null, array('transactions'=>false)), '', false);
+        return $mock;
+    }
+
+    protected function getObjectManagerMock()
+    {
+        $factory = new \Jackalope\Factory;
+        return $this->getMock('\Jackalope\ObjectManager', array('getNodeTypes'), array($factory, $this->getTransportStub('/jcr:root'), $this->getSessionMock()));
     }
 
     protected function getNodeTypeManager()
@@ -75,8 +92,8 @@ abstract class TestCase extends \PHPUnit_Framework_TestCase
         $factory = new \Jackalope\Factory;
         $dom = new \DOMDocument();
         $dom->load(dirname(__FILE__) . '/../fixtures/nodetypes.xml');
-        $converter = new \Jackalope\NodeType\NodeTypeXmlConverter;
-        $om = $this->getMock('\Jackalope\ObjectManager', array('getNodeTypes'), array($factory, $this->getTransportStub('/jcr:root'), $this->getSessionMock()));
+        $converter = new \Jackalope\NodeType\NodeTypeXmlConverter($factory);
+        $om = $this->getObjectManagerMock();
         $om->expects($this->any())
             ->method('getNodeTypes')
             ->will($this->returnValue($converter->getNodeTypesFromXml($dom)));

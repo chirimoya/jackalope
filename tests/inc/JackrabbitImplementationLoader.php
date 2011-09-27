@@ -35,6 +35,9 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
                     'OrderableChildNodes',
         );
 
+        $this->unsupportedCases = array(
+                    'Versioning\\DeleteVersionTest',
+        );
         $this->unsupportedTests = array(
                     'Connecting\\RepositoryTest::testLoginException', //TODO: figure out what would be invalid credentials
                     'Connecting\\RepositoryTest::testNoLogin',
@@ -44,14 +47,17 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
                     'Reading\\SessionNamespaceRemappingTest::testSetNamespacePrefix',
                     'Reading\\NodeReadMethodsTest::testGetSharedSetUnreferenced', // TODO: should this be moved to 14_ShareableNodes
 
-                    'Query\QueryManagerTest::testGetQuery',
-                    'Query\QueryManagerTest::testGetQueryInvalid',
+                    'Query\\QueryManagerTest::testGetQuery',
+                    'Query\\QueryManagerTest::testGetQueryInvalid',
+                    'Query\\QueryObjectSql2Test::testGetStoredQueryPath',
                     'Query\\NodeViewTest::testSeekable',
 
                     'Writing\\NamespaceRegistryTest::testRegisterUnregisterNamespace',
                     'Writing\\CopyMethodsTest::testCopyUpdateOnCopy',
+                    'Writing\\MoveMethodsTest::testNodeOrderBeforeEnd',
+                    'Writing\\MoveMethodsTest::testNodeOrderBeforeDown',
+                    'Writing\\MoveMethodsTest::testNodeOrderBeforeUp',
         );
-
     }
 
     public static function getInstance()
@@ -67,11 +73,13 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
         return array('jackalope.jackrabbit_uri' => $GLOBALS['jackrabbit.uri']);
     }
 
-    public function getCredentials() {
+    public function getCredentials()
+    {
         return new \PHPCR\SimpleCredentials($GLOBALS['phpcr.user'], $GLOBALS['phpcr.pass']);
     }
 
-    public function getInvalidCredentials() {
+    public function getInvalidCredentials()
+    {
         return new \PHPCR\SimpleCredentials('nonexistinguser', '');
     }
 

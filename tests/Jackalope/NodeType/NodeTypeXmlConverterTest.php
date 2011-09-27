@@ -10,7 +10,8 @@ class NodeTypeXmlConverterDefinitionTest extends TestCase
 
     public function setUp()
     {
-        $this->converter = new NodeTypeXmlConverter();
+        $factory = new \Jackalope\Factory;
+        $this->converter = new NodeTypeXmlConverter($factory);
     }
 
     public function testConvertNtBase()
@@ -34,7 +35,7 @@ class NodeTypeXmlConverterDefinitionTest extends TestCase
                     'isProtected' => true,
                     'onParentVersion' => 4,
                     'requiredType' => 7,
-                    'multiple' => true,
+                    'multiple' => false,
                     'fullTextSearchable' => true,
                     'queryOrderable' => true,
                 ), array(
@@ -70,9 +71,9 @@ class NodeTypeXmlConverterDefinitionTest extends TestCase
                 array(
                     'declaringNodeType' => 'nt:unstructured',
                     'name' => '*',
-                    'isAutoCreated' => true,
+                    'isAutoCreated' => false,
                     'isMandatory' => false,
-                    'isProtected' => true,
+                    'isProtected' => false,
                     'onParentVersion' => 1,
                     'requiredType' => 0,
                     'multiple' => true,
@@ -84,9 +85,9 @@ class NodeTypeXmlConverterDefinitionTest extends TestCase
                 array(
                     'declaringNodeType' => 'nt:unstructured',
                     'name' => '*',
-                    'isAutoCreated' => true,
+                    'isAutoCreated' => false,
                     'isMandatory' => false,
-                    'isProtected' => true,
+                    'isProtected' => false,
                     'onParentVersion' => 2,
                     'allowsSameNameSiblings' => false,
                     'defaultPrimaryTypeName' => 'nt:unstructured',
@@ -99,11 +100,11 @@ class NodeTypeXmlConverterDefinitionTest extends TestCase
     {
         $xml = <<<XML
 <nodeTypes>
-    <nodeType name="nt:base" isMixin="false" isAbstract="true">
-        <propertyDefinition name="jcr:primaryType" requiredType="NAME" autoCreated="true" mandatory="true" protected="true" onParentVersion="COMPUTE" />
-        <propertyDefinition name="jcr:mixinTypes" requiredType="NAME" autoCreated="true" mandatory="true" protected="true" multiple="true" onParentVersion="COMPUTE" />
+    <nodeType hasOrderableChildNodes="true" isQueryable="true" name="nt:base" isMixin="false" isAbstract="true">
+        <propertyDefinition name="jcr:primaryType" requiredType="NAME" autoCreated="true" mandatory="true" protected="true" multiple="false" fullTextSearchable="true" queryOrderable="true" onParentVersion="COMPUTE" />
+        <propertyDefinition name="jcr:mixinTypes" requiredType="NAME" autoCreated="true" mandatory="true" protected="true" multiple="true" fullTextSearchable="true" queryOrderable="true" onParentVersion="COMPUTE" />
     </nodeType>
-    <nodeType name="nt:unstructured" hasOrderableChildNodes="true" isMixin="false" isAbstract="false">
+    <nodeType hasOrderableChildNodes="true" isQueryable="true" name="nt:unstructured" isMixin="false" isAbstract="false">
         <supertypes>
             <supertype>nt:base</supertype>
         </supertypes>
@@ -114,7 +115,7 @@ class NodeTypeXmlConverterDefinitionTest extends TestCase
         </childNodeDefinition>
         <propertyDefinition autoCreated="false" declaringNodeType="nt:unstructured" fullTextSearchable="true" mandatory="false" multiple="true" name="*" onParentVersion="COPY" protected="false" queryOrderable="true" requiredType="undefined" />
     </nodeType>
-    <nodeType name="mix:etag" isMixin="true">
+    <nodeType hasOrderableChildNodes="false" isQueryable="false" name="mix:etag" isMixin="true">
         <propertyDefinition name="jcr:etag" requiredType="STRING" autoCreated="true" protected="true" onParentVersion="COMPUTE" />
     </nodeType>
     <nodeType name="nt:hierachy" isAbstract="true">

@@ -7,7 +7,8 @@ use Jackalope\Helper;
 use DOMDocument;
 
 /**
- * Converter to generate NodeType elements array from storage XML (jackrabbit format).
+ * Converter to generate NodeType elements array from storage XML (jackrabbit
+ * format).
  *
  * @license http://www.apache.org/licenses/LICENSE-2.0  Apache License Version 2.0, January 2004
  *   Licensed under the Apache License, Version 2.0 (the "License");
@@ -27,7 +28,18 @@ class NodeTypeXmlConverter
     const DEFAULT_PRIMARY_NODE = 'nt:base';
 
     /**
+     * Empty constructor.
+     *
+     * Everything inside jackalope has to accept the factory in the
+     * constructor. We define the constructor but to nothing at all.
+     */
+    public function __construct($factory)
+    {
+    }
+
+    /**
      * @param \DOMElement $node
+     *
      * @return array
      */
     public function getItemDefinitionFromXml(DOMElement $node)
@@ -35,9 +47,9 @@ class NodeTypeXmlConverter
         $data = array();
         $data['declaringNodeType'] = $node->getAttribute('declaringNodeType');
         $data['name'] = $node->getAttribute('name');
-        $data['isAutoCreated'] = Helper::getBoolAttribute($node, 'isAutoCreated');
+        $data['isAutoCreated'] = Helper::getBoolAttribute($node, 'autoCreated');
         $data['isMandatory'] = Helper::getBoolAttribute($node, 'mandatory');
-        $data['isProtected'] = Helper::getBoolAttribute($node, 'isProtected');
+        $data['isProtected'] = Helper::getBoolAttribute($node, 'protected');
         $data['onParentVersion'] = \PHPCR\Version\OnParentVersionAction::valueFromName($node->getAttribute('onParentVersion'));
 
         return $data;
@@ -46,7 +58,8 @@ class NodeTypeXmlConverter
     /**
      * Convert property definition xml into array.
      *
-     * @param  \DOMElement $node
+     * @param \DOMElement $node
+     *
      * @return array
      */
     public function getPropertyDefinitionFromXml(DOMElement $node)
@@ -79,7 +92,8 @@ class NodeTypeXmlConverter
     /**
      * Convert Node Definition XML into array.
      *
-     * @param  \DOMElement $node
+     * @param \DOMElement $node
+     *
      * @return array
      */
     public function getNodeDefinitionFromXml(DOMElement $node)
@@ -107,6 +121,7 @@ class NodeTypeXmlConverter
      * Convert NodeTypeDefintion XML into array.
      *
      * @param \DOMElement $node
+     *
      * @return array
      */
     public function getNodeTypeDefinitionFromXml(DOMElement $node)

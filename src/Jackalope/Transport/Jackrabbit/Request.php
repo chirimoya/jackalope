@@ -196,7 +196,7 @@ class Request
     }
 
     /**
-     * @param   int|string  $depth
+     * @param int|string  $depth
      */
     public function setDepth($depth)
     {
@@ -432,6 +432,8 @@ class Request
                         throw new \PHPCR\ItemNotFoundException($exceptionMsg);
                     case 'javax.jcr.nodetype.ConstraintViolationException':
                         throw new \PHPCR\NodeType\ConstraintViolationException($exceptionMsg);
+                    case 'javax.jcr.ReferentialIntegrityException':
+                        throw new \PHPCR\ReferentialIntegrityException($exceptionMsg);
                     //TODO: Two more errors needed for Transactions. How does the corresponding Jackrabbit response look like?
                     // javax.transaction.RollbackException => \PHPCR\Transaction\RollbackException
                     // java.lang.SecurityException => \PHPCR\AccessDeniedException
@@ -506,7 +508,8 @@ class Request
         foreach ($responses as $key => $response) {
             $json[$key] = json_decode($response);
             if (null === $json[$key] && 'null' !== strtolower($response)) {
-                throw new \PHPCR\RepositoryException("Not a valid json object: \nRequest: {$this->method} {$this->uri[$key]} \nResponse: \n$response");
+                $uri = reset($this->uri); // FIXME was $this->uri[$key]. at which point did we lose the right key?
+                throw new \PHPCR\RepositoryException("Not a valid json object: \nRequest: {$this->method} $uri \nResponse: \n$response");
             }
         }
         //TODO: are there error responses in json format? if so, handle them
