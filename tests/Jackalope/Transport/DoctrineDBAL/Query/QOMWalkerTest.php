@@ -7,7 +7,7 @@ use Jackalope\Query\QOM\QueryObjectModelFactory;
 use PHPCR\Query\QOM\QueryObjectModelConstantsInterface;
 
 class QOMWalkerTest extends DoctrineDBALTestCase
-{    
+{
     /**
      *
      * @var QueryObjectModelFactory
@@ -17,17 +17,17 @@ class QOMWalkerTest extends DoctrineDBALTestCase
     private $walker;
 
     private $nodeTypeManager;
-    
+
     public function setUp()
     {
         parent::setUp();
 
         $conn = $this->getConnection();
         $this->nodeTypeManager = $this->getMock('Jackalope\NodeType\NodeTypeManager', array(), array(), '', false);
-        $this->factory = new QueryObjectModelFactory;
+        $this->factory = new QueryObjectModelFactory(new \Jackalope\Factory);
         $this->walker = new QOMWalker($this->nodeTypeManager, $conn->getDatabasePlatform());
     }
-    
+
     public function testDefaultQuery()
     {
         $this->nodeTypeManager->expects($this->once())->method('getSubtypes')->will($this->returnValue( array() ));
@@ -43,7 +43,7 @@ class QOMWalkerTest extends DoctrineDBALTestCase
         $this->nodeTypeManager->expects($this->once())->method('getSubtypes')->will($this->returnValue( array() ));
 
         $query = $this->factory->createQuery(
-            $this->factory->selector('nt:unstructured'), 
+            $this->factory->selector('nt:unstructured'),
             $this->factory->comparison($this->factory->propertyValue('jcr:path'), '=', $this->factory->literal('/')),
             array(),
             array()
@@ -76,7 +76,7 @@ class QOMWalkerTest extends DoctrineDBALTestCase
 
         $query = $this->factory->createQuery(
             $this->factory->selector('nt:unstructured'),
-            $this->factory->_and(
+            $this->factory->andConstraint(
                 $this->factory->comparison($this->factory->propertyValue('jcr:path'), '=', $this->factory->literal('/')),
                 $this->factory->comparison($this->factory->propertyValue('jcr:path'), '=', $this->factory->literal('/'))
             ),
@@ -94,7 +94,7 @@ class QOMWalkerTest extends DoctrineDBALTestCase
 
         $query = $this->factory->createQuery(
             $this->factory->selector('nt:unstructured'),
-            $this->factory->_or(
+            $this->factory->orConstraint(
                 $this->factory->comparison($this->factory->propertyValue('jcr:path'), '=', $this->factory->literal('/')),
                 $this->factory->comparison($this->factory->propertyValue('jcr:path'), '=', $this->factory->literal('/'))
             ),
@@ -112,7 +112,7 @@ class QOMWalkerTest extends DoctrineDBALTestCase
 
         $query = $this->factory->createQuery(
             $this->factory->selector('nt:unstructured'),
-            $this->factory->not(
+            $this->factory->notConstraint(
                 $this->factory->comparison($this->factory->propertyValue('jcr:path'), '=', $this->factory->literal('/'))
             ),
             array(),

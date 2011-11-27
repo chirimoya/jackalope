@@ -4,12 +4,22 @@ namespace Jackalope\Query\QOM;
 
 use PHPCR\Query\QOM\QueryObjectModelInterface;
 use PHPCR\Query\QOM\SourceInterface;
+use PHPCR\Query\QOM\ConstraintInterface;
+use PHPCR\Query\QOM\OrderingInterface;
+use PHPCR\Query\QOM\ColumnInterface;
+
+use Jackalope\ObjectManager;
+use Jackalope\Query\SqlQuery;
 
 // inherit all doc
 /**
+ * {@inheritDoc}
+ *
+ * We extend SqlQuery to have features like limit and offset
+ *
  * @api
  */
-class QueryObjectModel implements QueryObjectModelInterface
+class QueryObjectModel extends SqlQuery implements QueryObjectModelInterface
 {
     /**
      * @var \PHPCR\Query\QOM\SourceInterface
@@ -34,13 +44,30 @@ class QueryObjectModel implements QueryObjectModelInterface
     /**
      * Constructor
      *
+     * @param object $factory an object factory implementing "get" as
+     *      described in \Jackalope\Factory
+     * @param ObjectManager $objectManager (can be omitted if you do not want
+     *      to execute the query but just use it with a parser)
      * @param SourceInterface $source
      * @param ConstraintInterface $constraint
      * @param array $orderings
      * @param array $columns
      */
-    public function __construct(SourceInterface $source, $constraint, array $orderings, array $columns)
+    public function __construct($factory, ObjectManager $objectManager = null,
+                                SourceInterface $source, ConstraintInterface $constraint = null,
+                                array $orderings, array $columns)
     {
+        foreach ($orderings as $o) {
+            if (! $o instanceof OrderingInterface) {
+                throw new \InvalidArgumentException('Not a valid ordering: '.$o);
+            }
+        }
+        foreach ($columns as $c) {
+            if (! $c instanceof ColumnInterface) {
+                throw new \InvalidArgumentException('Not a valid column: '.$o);
+            }
+        }
+        parent::__construct($factory, '', $objectManager);
         $this->source = $source;
         $this->constraint = $constraint;
         $this->orderings = $orderings;
@@ -87,44 +114,9 @@ class QueryObjectModel implements QueryObjectModelInterface
     /**
      * @api
      */
-    function bindValue($varName, $value)
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    /**
-     * @api
-     */
-    function execute()
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    /**
-     * @api
-     */
     function getBindVariableNames()
     {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    /**
-     * @api
-     */
-    function setLimit($limit)
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    /**
-     * @api
-     */
-    function setOffset($offset)
-    {
+        // TODO: can we inherit from SqlQuery?
         throw new \Jackalope\NotImplementedException();
     }
 
@@ -134,7 +126,8 @@ class QueryObjectModel implements QueryObjectModelInterface
      */
     function getStatement()
     {
-        throw new \Jackalope\NotImplementedException();
+        $converter = new \PHPCR\Util\QOM\QomToSql2QueryConverter(new \PHPCR\Util\QOM\Sql2Generator());
+        return $converter->convert($this);
     }
 
     // inherit all doc
@@ -143,24 +136,6 @@ class QueryObjectModel implements QueryObjectModelInterface
      */
     function getLanguage()
     {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    /**
-     * @api
-     */
-    function getStoredQueryPath()
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    /**
-     * @api
-     */
-    function storeAsNode($absPath)
-    {
-        throw new \Jackalope\NotImplementedException();
+        return self::JCR_JQOM;
     }
 }

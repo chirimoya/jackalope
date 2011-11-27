@@ -2,6 +2,8 @@
 
 namespace Jackalope\Query\QOM;
 
+
+use Jackalope\ObjectManager;
 use PHPCR\Query\QOM\QueryObjectModelFactoryInterface;
 
 // inherit all doc
@@ -10,14 +12,47 @@ use PHPCR\Query\QOM\QueryObjectModelFactoryInterface;
  */
 class QueryObjectModelFactory implements QueryObjectModelFactoryInterface
 {
+    /**
+     * The factory to instantiate objects
+     * @var \Jackalope\Factory
+     */
+    protected $factory;
+
+    /**
+     * @var \Jackalope\ObjectManager
+     */
+    protected $objectManager;
+
+    /**
+     * Create the query object model factory - get this from the QueryManager
+     *
+     * @param object $factory an object factory implementing "get" as
+     *      described in \Jackalope\Factory
+     * @param ObjectManager $objectManager only used to create the query (can
+     *      be omitted if you do not want to execute the query but just use it
+     *      with a parser)
+     */
+    public function __construct($factory, ObjectManager $objectManager = null)
+    {
+        $this->factory = $factory;
+        $this->objectManager = $objectManager;
+    }
+
     // inherit all doc
     /**
      * @api
      */
-    function createQuery(\PHPCR\Query\QOM\SourceInterface $source, $constraint, array $orderings, array $columns)
-    {
-        return new QueryObjectModel($source, $constraint, $orderings, $columns);
+    function createQuery(\PHPCR\Query\QOM\SourceInterface $source,
+                         \PHPCR\Query\QOM\ConstraintInterface $constraint = null,
+                         array $orderings,
+                         array $columns
+    ) {
+        return $this->factory->get('Query\QOM\QueryObjectModel',
+                                   array($this->objectManager, $source, $constraint, $orderings, $columns));
     }
+
+    // TODO: should we use the factory ->get here? but this would mean all of them need to expect the factory as first parameter
+    // or refactor the factory to make the first param optional.
 
     // inherit all doc
     /**
@@ -78,7 +113,7 @@ class QueryObjectModelFactory implements QueryObjectModelFactoryInterface
     /**
      * @api
      */
-    function _and(\PHPCR\Query\QOM\ConstraintInterface $constraint1,
+    function andConstraint(\PHPCR\Query\QOM\ConstraintInterface $constraint1,
                          \PHPCR\Query\QOM\ConstraintInterface $constraint2)
     {
         return new AndConstraint($constraint1, $constraint2);
@@ -88,7 +123,7 @@ class QueryObjectModelFactory implements QueryObjectModelFactoryInterface
     /**
      * @api
      */
-    function _or(\PHPCR\Query\QOM\ConstraintInterface $constraint1,
+    function orConstraint(\PHPCR\Query\QOM\ConstraintInterface $constraint1,
                         \PHPCR\Query\QOM\ConstraintInterface $constraint2)
     {
         return new OrConstraint($constraint1, $constraint2);
@@ -98,7 +133,7 @@ class QueryObjectModelFactory implements QueryObjectModelFactoryInterface
     /**
      * @api
      */
-    function not(\PHPCR\Query\QOM\ConstraintInterface $constraint)
+    function notConstraint(\PHPCR\Query\QOM\ConstraintInterface $constraint)
     {
         return new NotConstraint($constraint);
     }

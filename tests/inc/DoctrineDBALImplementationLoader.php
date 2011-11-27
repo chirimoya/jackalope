@@ -11,7 +11,7 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
 
     protected function __construct()
     {
-        parent::__construct('Jackalope\RepositoryFactoryDoctrineDBAL');
+        parent::__construct('Jackalope\RepositoryFactoryDoctrineDBAL', $GLOBALS['phpcr.workspace']);
 
         $this->unsupportedChapters = array(
                     'PermissionsAndCapabilities',
@@ -42,6 +42,7 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
                     'Reading\\SessionReadMethodsTest::testImpersonate', //TODO: Check if that's implemented in newer jackrabbit versions.
                     'Reading\\SessionNamespaceRemappingTest::testSetNamespacePrefix',
                     'Reading\\NodeReadMethodsTest::testGetSharedSetUnreferenced', // TODO: should this be moved to 14_ShareableNodes
+                    'Reading\\PropertyReadMethodsTest::testJcrCreated', // fails because NodeTypeDefinitions do not work inside DoctrineDBAL transport yet.
 
                     'Query\QueryManagerTest::testGetQuery',
                     'Query\QueryManagerTest::testGetQueryInvalid',
@@ -65,7 +66,7 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
 
     public function getRepositoryFactoryParameters()
     {
-        global $dbConn; // initialized in bootstrap_doctrine.php
+        global $dbConn; // initialized in bootstrap_doctrine_dbal.php
         return array('jackalope.doctrine_dbal_connection' => $dbConn);
     }
 
@@ -93,7 +94,7 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
     {
         global $dbConn;
 
-        $dbConn->insert('phpcr_workspaces', array('name' => 'tests'));
+        $dbConn->insert('phpcr_workspaces', array('name' => $GLOBALS['phpcr.workspace']));
         $transport = new \Jackalope\Transport\DoctrineDBAL\Client(new \Jackalope\Factory, $dbConn);
         $GLOBALS['pdo'] = $dbConn->getWrappedConnection();
         return new \Jackalope\Repository(null, $transport);
@@ -112,7 +113,7 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
 
     function getFixtureLoader()
     {
-        require_once "DoctrineFixtureLoader.php";
-        return new \DoctrineFixtureLoader($GLOBALS['pdo'], __DIR__ . "/../fixtures/doctrine/");
+        require_once "DoctrineDBALFixtureLoader.php";
+        return new DoctrineDBALFixtureLoader($GLOBALS['pdo'], __DIR__ . "/../fixtures/doctrine/");
     }
 }

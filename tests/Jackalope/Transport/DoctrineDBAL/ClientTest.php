@@ -19,11 +19,11 @@ class ClientTest extends DoctrineDBALTestCase
     public function setUp()
     {
         parent::setUp();
-        
+
         $conn = $this->getConnection();
         $schema = RepositorySchema::create();
 
-        foreach ($schema->toDropSql($conn->getDatabasePlatform()) AS $statement) {
+        foreach ($schema->toDropSql($conn->getDatabasePlatform()) as $statement) {
             try {
                 $conn->exec($statement);
             } catch(\Exception $e) {
@@ -31,7 +31,7 @@ class ClientTest extends DoctrineDBALTestCase
             }
         }
 
-        foreach ($schema->toSql($conn->getDatabasePlatform()) AS $statement) {
+        foreach ($schema->toSql($conn->getDatabasePlatform()) as $statement) {
             $conn->exec($statement);
         }
 
@@ -70,7 +70,7 @@ class ClientTest extends DoctrineDBALTestCase
         $ntm = $workspace->getNodeTypeManager();
         $template = $ntm->createNodeTypeTemplate();
         $template->setName('phpcr:article');
-        
+
         $propertyDefs = $template->getPropertyDefinitionTemplates();
         $propertyTemplate = $ntm->createPropertyDefinitionTemplate();
         $propertyTemplate->setName('headline');
@@ -85,7 +85,7 @@ class ClientTest extends DoctrineDBALTestCase
         $childDefs[] = $nodeTemplate;
 
         $ntm->registerNodeTypes(array($template), true);
-        
+
         $def = $ntm->getNodeType('phpcr:article');
         $this->assertEquals("phpcr:article", $def->getName());
         $this->assertEquals(1, count($def->getDeclaredPropertyDefinitions()));

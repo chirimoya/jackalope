@@ -19,7 +19,7 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
                 die('Please set '.$val.' in your phpunit.xml.' . "\n");
             }
         }
-        parent::__construct('Jackalope\RepositoryFactoryJackrabbit');
+        parent::__construct('Jackalope\RepositoryFactoryJackrabbit', $GLOBALS['phpcr.workspace']);
 
         $this->unsupportedChapters = array(
                     'PermissionsAndCapabilities',
@@ -107,6 +107,6 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
     function getFixtureLoader()
     {
         require_once "JackrabbitFixtureLoader.php";
-        return new JackrabbitFixtureLoader(__DIR__.'/../phpcr-api/fixtures/', (isset($GLOBALS['jackrabbit.jar']) ? $config['jackrabbit.jar'] : null));
+        return new JackrabbitFixtureLoader(__DIR__.'/../phpcr-api/fixtures/', (isset($GLOBALS['jackrabbit.jar']) ? $GLOBALS['jackrabbit.jar'] : null));
     }
 }

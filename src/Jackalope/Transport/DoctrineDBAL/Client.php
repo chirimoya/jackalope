@@ -1,15 +1,32 @@
 <?php
+
 namespace Jackalope\Transport\DoctrineDBAL;
 
 use PHPCR\PropertyType;
 use PHPCR\RepositoryException;
+use PHPCR\Query\QueryInterface;
+use PHPCR\NamespaceRegistryInterface;
+use PHPCR\RepositoryInterface;
 use PHPCR\Util\UUIDHelper;
-use Doctrine\DBAL\Connection;
+use PHPCR\Util\QOM\Sql2ToQomQueryConverter;
+use PHPCR\NoSuchWorkspaceException;
+use PHPCR\ItemExistsException;
+use PHPCR\ItemNotFoundException;
+use PHPCR\ReferentialIntegrityException;
+use PHPCR\ValueFormatException;
+use PHPCR\PathNotFoundException;
+use PHPCR\Query\InvalidQueryException;
+
 use Doctrine\Common\Cache\Cache;
 use Doctrine\Common\Cache\ArrayCache;
+
+use Doctrine\DBAL\Connection;
+use Doctrine\DBAL\Platforms\PostgreSqlPlatform;
+
 use Jackalope\TransportInterface;
 use Jackalope\NodeType\NodeTypeManager;
 use Jackalope\NodeType\PHPCR2StandardNodeTypes;
+use Jackalope\NotImplementedException;
 
 /**
  * Class to handle the communication between Jackalope and RDBMS via Doctrine DBAL.
@@ -51,7 +68,6 @@ class Client implements TransportInterface
     private $nodeIdentifiers = array();
 
     /**
-     *
      * @var PHPCR\NodeType\NodeTypeManagerInterface
      */
     private $nodeTypeManager = null;
@@ -73,11 +89,11 @@ class Client implements TransportInterface
      * @var array
      */
     private $namespaces = array(
-        \PHPCR\NamespaceRegistryInterface::PREFIX_EMPTY => \PHPCR\NamespaceRegistryInterface::NAMESPACE_EMPTY,
-        \PHPCR\NamespaceRegistryInterface::PREFIX_JCR => \PHPCR\NamespaceRegistryInterface::NAMESPACE_JCR,
-        \PHPCR\NamespaceRegistryInterface::PREFIX_NT => \PHPCR\NamespaceRegistryInterface::NAMESPACE_NT,
-        \PHPCR\NamespaceRegistryInterface::PREFIX_MIX => \PHPCR\NamespaceRegistryInterface::NAMESPACE_MIX,
-        \PHPCR\NamespaceRegistryInterface::PREFIX_XML => \PHPCR\NamespaceRegistryInterface::NAMESPACE_XML,
+        NamespaceRegistryInterface::PREFIX_EMPTY => NamespaceRegistryInterface::NAMESPACE_EMPTY,
+        NamespaceRegistryInterface::PREFIX_JCR => NamespaceRegistryInterface::NAMESPACE_JCR,
+        NamespaceRegistryInterface::PREFIX_NT => NamespaceRegistryInterface::NAMESPACE_NT,
+        NamespaceRegistryInterface::PREFIX_MIX => NamespaceRegistryInterface::NAMESPACE_MIX,
+        NamespaceRegistryInterface::PREFIX_XML => NamespaceRegistryInterface::NAMESPACE_XML,
         'phpcr' => 'http://github.com/jackalope/jackalope', // TODO: Namespace?
     );
 
@@ -111,9 +127,9 @@ class Client implements TransportInterface
         $this->factory = $factory;
         $this->conn = $conn;
         $this->indexes = $indexes;
-        $this->sequenceWorkspaceName = ($conn->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) ? 'phpcr_workspaces_id_seq' : null;
-        $this->sequenceNodeName = ($conn->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) ? 'phpcr_nodes_id_seq' : null;
-        $this->sequenceTypeName = ($conn->getDatabasePlatform() instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) ? 'phpcr_type_nodes_id_seq' : null;
+        $this->sequenceWorkspaceName = ($conn->getDatabasePlatform() instanceof PostgreSqlPlatform) ? 'phpcr_workspaces_id_seq' : null;
+        $this->sequenceNodeName = ($conn->getDatabasePlatform() instanceof PostgreSqlPlatform) ? 'phpcr_nodes_id_seq' : null;
+        $this->sequenceTypeName = ($conn->getDatabasePlatform() instanceof PostgreSqlPlatform) ? 'phpcr_type_nodes_id_seq' : null;
         $this->cache = $cache ?: new ArrayCache();
     }
 
@@ -129,17 +145,17 @@ class Client implements TransportInterface
     public function createWorkspace($name, $srcWorkspace = null)
     {
         if (null !== $srcWorkspace) {
-            throw new \Jackalope\NotImplementedException();
+            throw new NotImplementedException();
         }
 
         $workspaceId = $this->getWorkspaceId($name);
         if ($workspaceId !== false) {
-            throw new \PHPCR\RepositoryException("Workspace '" . $name . "' already exists");
+            throw new RepositoryException("Workspace '$name' already exists");
         }
         $this->conn->insert('phpcr_workspaces', array('name' => $name));
         $workspaceId = $this->conn->lastInsertId($this->sequenceWorkspaceName);
         if (!$workspaceId) {
-            throw new \PHPCR\RepositoryException("Workspace creation fails.");
+            throw new RepositoryException("Workspace creation fails.");
         }
 
         $this->conn->insert("phpcr_nodes", array(
@@ -166,16 +182,14 @@ class Client implements TransportInterface
         }
 
         $this->workspaceId = $this->getWorkspaceId($workspaceName);
-        if (!$this->workspaceId) {
-            // create default workspace if it not exists
-            if ($workspaceName === "default") {
-                $this->createWorkspace($workspaceName);
-                $this->workspaceId = $this->getWorkspaceId($workspaceName);
-            }
+        // create default workspace if it not exists
+        if (!$this->workspaceId && $workspaceName === "default") {
+            $this->createWorkspace($workspaceName);
+            $this->workspaceId = $this->getWorkspaceId($workspaceName);
         }
 
         if (!$this->workspaceId) {
-            throw new \PHPCR\NoSuchWorkspaceException;
+            throw new NoSuchWorkspaceException("Requested workspace: $workspaceName");
         }
 
         $this->loggedIn = true;
@@ -197,8 +211,18 @@ class Client implements TransportInterface
 
     private function getWorkspaceId($workspaceName)
     {
-        $sql = "SELECT id FROM phpcr_workspaces WHERE name = ?";
-        return $this->conn->fetchColumn($sql, array($workspaceName));
+        try {
+            $sql = "SELECT id FROM phpcr_workspaces WHERE name = ?";
+            return $this->conn->fetchColumn($sql, array($workspaceName));
+        } catch(\PDOException $e) {
+            if (1045 == $e->getCode()) {
+                throw new \PHPCR\LoginException('Access denied with your credentials: '.$e->getMessage());
+            }
+            if ("42S02" == $e->getCode()) {
+                throw new \PHPCR\RepositoryException('You did not properly set up the database for the repository. See README file for more information. Message from backend: '.$e->getMessage());
+            }
+            throw new \PHPCR\RepositoryException('Unexpected error talking to the backend: '.$e->getMessage());
+        }
     }
 
     private function assertLoggedIn()
@@ -222,7 +246,7 @@ class Client implements TransportInterface
     public function getRepositoryDescriptors()
     {
         return array(
-          'identifier.stability' => \PHPCR\RepositoryInterface::IDENTIFIER_STABILITY_INDEFINITE_DURATION,
+          'identifier.stability' => RepositoryInterface::IDENTIFIER_STABILITY_INDEFINITE_DURATION,
           'jcr.repository.name'  => 'jackalope_doctrine_dbal',
           'jcr.repository.vendor' => 'Jackalope Community',
           'jcr.repository.vendor.url' => 'http://github.com/jackalope',
@@ -281,7 +305,7 @@ class Client implements TransportInterface
             $data = $this->conn->fetchAll('SELECT * FROM phpcr_namespaces');
             $this->fetchedUserNamespaces = true;
 
-            foreach ($data AS $row) {
+            foreach ($data as $row) {
                 $this->namespaces[$row['prefix']] = $row['uri'];
             }
         }
@@ -297,26 +321,26 @@ class Client implements TransportInterface
         if (null !== $srcWorkspace) {
             $workspaceId = $this->getWorkspaceId($srcWorkspace);
             if ($workspaceId === false) {
-                throw new \PHPCR\NoSuchWorkspaceException("Source workspace '" . $srcWorkspace . "' does not exist.");
+                throw new NoSuchWorkspaceException("Source workspace '" . $srcWorkspace . "' does not exist.");
             }
         }
 
         if (substr($dstAbsPath, -1, 1) == "]") {
             // TODO: Understand assumptions of CopyMethodsTest::testCopyInvalidDstPath more
-            throw new \PHPCR\RepositoryException("Invalid destination path");
+            throw new RepositoryException("Invalid destination path");
         }
 
         $srcNodeId = $this->pathExists($srcAbsPath);
         if (!$srcNodeId) {
-            throw new \PHPCR\PathNotFoundException("Source path '".$srcAbsPath."' not found");
+            throw new PathNotFoundException("Source path '".$srcAbsPath."' not found");
         }
 
         if ($this->pathExists($dstAbsPath)) {
-            throw new \PHPCR\ItemExistsException("Cannot copy to destination path '" . $dstAbsPath . "' that already exists.");
+            throw new ItemExistsException("Cannot copy to destination path '" . $dstAbsPath . "' that already exists.");
         }
 
         if (!$this->pathExists($this->getParentPath($dstAbsPath))) {
-            throw new \PHPCR\PathNotFoundException("Parent of the destination path '" . $this->getParentPath($dstAbsPath) . "' has to exist.");
+            throw new PathNotFoundException("Parent of the destination path '" . $this->getParentPath($dstAbsPath) . "' has to exist.");
         }
 
         // Algorithm:
@@ -326,9 +350,8 @@ class Client implements TransportInterface
         // 4. if a reference is in the properties, either update the uuid based on the map if its inside the copied graph or keep it.
         // 5. "May drop mixin types"
 
-        $this->conn->beginTransaction();
-
         try {
+            $this->conn->beginTransaction();
 
             $sql = "SELECT * FROM phpcr_nodes WHERE path LIKE ? AND workspace_id = ?";
             $stmt = $this->conn->executeQuery($sql, array($srcAbsPath . "%", $workspaceId));
@@ -365,14 +388,16 @@ class Client implements TransportInterface
         } else {
             list($alias, $name) = explode(":", $name);
         }
+
         $namespaces = $this->getNamespaces();
+
         return array($namespaces[$alias], $name);
     }
 
     private function syncNode($uuid, $path, $parent, $type, $props = array(), $propsData = array())
     {
         // TODO: Not sure if there are always ALL props in $props, should be grab the online data here?
-        // TODO: Binary data is handled very inefficiently here, UPSERT will really be necessary here aswell as lzy handling
+        // TODO: Binary data is handled very inefficiently here, UPSERT will really be necessary here as well as lazy handling
 
         $this->conn->beginTransaction();
 
@@ -439,8 +464,8 @@ class Client implements TransportInterface
 
     private function syncBinaryData($nodeId, $binaryData)
     {
-        foreach ($binaryData AS $propertyName => $binaryValues) {
-            foreach ($binaryValues AS $idx => $data) {
+        foreach ($binaryData as $propertyName => $binaryValues) {
+            foreach ($binaryValues as $idx => $data) {
                 $this->conn->delete('phpcr_binarydata', array(
                     'node_id'       => $nodeId,
                     'property_name' => $propertyName,
@@ -459,19 +484,18 @@ class Client implements TransportInterface
 
     private function syncForeignKeys($nodeId, $path, $props)
     {
-        $this->conn->delete('phpcr_nodes_foreignkeys', array(
-            'source_id' => $nodeId,
-        ));
-        foreach ($props AS $property) {
+        $this->conn->delete('phpcr_nodes_foreignkeys', array('source_id' => $nodeId));
+
+        foreach ($props as $property) {
             $type = $property->getType();
-            if ($type == \PHPCR\PropertyType::REFERENCE || $type == \PHPCR\PropertyType::WEAKREFERENCE) {
+            if ($type === PropertyType::REFERENCE || $type === PropertyType::WEAKREFERENCE) {
                 $values = array_unique( $property->isMultiple() ? $property->getString() : array($property->getString()) );
 
-                foreach ($values AS $value) {
+                foreach ($values as $value) {
                     $targetId = $this->pathExists($this->getNodePathForIdentifier($value));
                     if (!$targetId) {
-                        if ($type == \PHPCR\PropertyType::REFERENCE) {
-                            throw new \PHPCR\ReferentialIntegrityException(
+                        if ($type == PropertyType::REFERENCE) {
+                            throw new ReferentialIntegrityException(
                                 "Trying to store reference to non-existant node with path '" . $value . "' in " .
                                 "node " . $path . " property " . $property->getName()
                             );
@@ -516,7 +540,7 @@ class Client implements TransportInterface
         $dom->appendChild($rootNode);
 
         $binaryData = null;
-        foreach ($properties AS $property) {
+        foreach ($properties as $property) {
             /* @var $prop \PHPCR\PropertyInterface */
             $propertyNode = $dom->createElement('sv:property');
             $propertyNode->setAttribute('sv:name', $property->getName());
@@ -524,26 +548,26 @@ class Client implements TransportInterface
             $propertyNode->setAttribute('sv:multi-valued', $property->isMultiple() ? "1" : "0");
 
             switch ($property->getType()) {
-                case \PHPCR\PropertyType::NAME:
-                case \PHPCR\PropertyType::URI:
-                case \PHPCR\PropertyType::WEAKREFERENCE:
-                case \PHPCR\PropertyType::REFERENCE:
-                case \PHPCR\PropertyType::PATH:
-                case \PHPCR\PropertyType::STRING:
+                case PropertyType::NAME:
+                case PropertyType::URI:
+                case PropertyType::WEAKREFERENCE:
+                case PropertyType::REFERENCE:
+                case PropertyType::PATH:
+                case PropertyType::STRING:
                     $values = $property->getString();
                     break;
-                case \PHPCR\PropertyType::DECIMAL:
+                case PropertyType::DECIMAL:
                     $values = $property->getDecimal();
                     break;
-                case \PHPCR\PropertyType::BOOLEAN:;
+                case PropertyType::BOOLEAN:;
                     $values = $property->getBoolean() ? "1" : "0";
                     break;
-                case \PHPCR\PropertyType::LONG:
+                case PropertyType::LONG:
                     $values = $property->getLong();
                     break;
-                case \PHPCR\PropertyType::BINARY:
+                case PropertyType::BINARY:
                     if ($property->isMultiple()) {
-                        foreach ((array)$property->getBinary() AS $binary) {
+                        foreach ((array)$property->getBinary() as $binary) {
                             $binary = stream_get_contents($binary);
                             $binaryData[$property->getName()][] = $binary;
                             $values[] = strlen($binary);
@@ -554,16 +578,16 @@ class Client implements TransportInterface
                         $values = strlen($binary);
                     }
                     break;
-                case \PHPCR\PropertyType::DATE:
+                case PropertyType::DATE:
                     $date = $property->getDate() ?: new \DateTime("now");
                     $values = $date->format('r');
                     break;
-                case \PHPCR\PropertyType::DOUBLE:
+                case PropertyType::DOUBLE:
                     $values = $property->getDouble();
                     break;
             }
 
-            foreach ((array)$values AS $value) {
+            foreach ((array)$values as $value) {
                 $propertyNode->appendChild($dom->createElement('sv:value', $value));
             }
 
@@ -577,7 +601,7 @@ class Client implements TransportInterface
     public function getAccessibleWorkspaceNames()
     {
         $workspaceNames = array();
-        foreach ($this->conn->fetchAll("SELECT name FROM phpcr_workspaces") AS $row) {
+        foreach ($this->conn->fetchAll("SELECT name FROM phpcr_workspaces") as $row) {
             $workspaceNames[] = $row['name'];
         }
         return $workspaceNames;
@@ -591,7 +615,7 @@ class Client implements TransportInterface
         $sql = "SELECT * FROM phpcr_nodes WHERE path = ? AND workspace_id = ?";
         $row = $this->conn->fetchAssoc($sql, array($path, $this->workspaceId));
         if (!$row) {
-            throw new \PHPCR\ItemNotFoundException("Item /".$path." not found.");
+            throw new ItemNotFoundException("Item /".$path." not found.");
         }
 
         $data = new \stdClass();
@@ -603,7 +627,7 @@ class Client implements TransportInterface
         $sql = "SELECT path FROM phpcr_nodes WHERE parent = ? AND workspace_id = ?";
         $children = $this->conn->fetchAll($sql, array($path, $this->workspaceId));
 
-        foreach ($children AS $child) {
+        foreach ($children as $child) {
             $childName = explode("/", $child['path']);
             $childName = end($childName);
             $data->{$childName} = new \stdClass();
@@ -612,34 +636,34 @@ class Client implements TransportInterface
         $dom = new \DOMDocument('1.0', 'UTF-8');
         $dom->loadXML($row['props']);
 
-        foreach ($dom->getElementsByTagNameNS('http://www.jcp.org/jcr/sv/1.0', 'property') AS $propertyNode) {
+        foreach ($dom->getElementsByTagNameNS('http://www.jcp.org/jcr/sv/1.0', 'property') as $propertyNode) {
             $name = $propertyNode->getAttribute('sv:name');
             $values = array();
             $type = (int)$propertyNode->getAttribute('sv:type');
-            foreach ($propertyNode->childNodes AS $valueNode) {
+            foreach ($propertyNode->childNodes as $valueNode) {
                 switch ($type) {
-                    case \PHPCR\PropertyType::NAME:
-                    case \PHPCR\PropertyType::URI:
-                    case \PHPCR\PropertyType::WEAKREFERENCE:
-                    case \PHPCR\PropertyType::REFERENCE:
-                    case \PHPCR\PropertyType::PATH:
-                    case \PHPCR\PropertyType::DECIMAL:
-                    case \PHPCR\PropertyType::STRING:
+                    case PropertyType::NAME:
+                    case PropertyType::URI:
+                    case PropertyType::WEAKREFERENCE:
+                    case PropertyType::REFERENCE:
+                    case PropertyType::PATH:
+                    case PropertyType::DECIMAL:
+                    case PropertyType::STRING:
                         $values[] = $valueNode->nodeValue;
                         break;
-                    case \PHPCR\PropertyType::BOOLEAN:
+                    case PropertyType::BOOLEAN:
                         $values[] = (bool)$valueNode->nodeValue;
                         break;
-                    case \PHPCR\PropertyType::LONG:
+                    case PropertyType::LONG:
                         $values[] = (int)$valueNode->nodeValue;
                         break;
-                    case \PHPCR\PropertyType::BINARY:
+                    case PropertyType::BINARY:
                         $values[] = (int)$valueNode->nodeValue;
                         break;
-                    case \PHPCR\PropertyType::DATE:
+                    case PropertyType::DATE:
                         $values[] = $valueNode->nodeValue;
                         break;
-                    case \PHPCR\PropertyType::DOUBLE:
+                    case PropertyType::DOUBLE:
                         $values[] = (double)$valueNode->nodeValue;
                         break;
                     default:
@@ -647,7 +671,7 @@ class Client implements TransportInterface
                 }
             }
 
-            if ($type == \PHPCR\PropertyType::BINARY) {
+            if ($type == PropertyType::BINARY) {
                 if ($propertyNode->getAttribute('sv:multi-valued') == 1) {
                     $data->{":" . $name} = $values;
                 } else {
@@ -681,30 +705,6 @@ class Client implements TransportInterface
         return $nodes;
     }
 
-    // inherit all doc
-    public function checkinItem($path)
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    public function checkoutItem($path)
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    public function restoreItem($removeExisting, $versionPath, $path)
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
-    public function getVersionHistory($path)
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
     private function pathExists($path)
     {
         $query = "SELECT id FROM phpcr_nodes WHERE path = ? AND workspace_id = ?";
@@ -727,7 +727,7 @@ class Client implements TransportInterface
             $nodeId = $this->pathExists($nodePath);
             if (!$nodeId) {
                 // no we really don't know that path
-                throw new \PHPCR\ItemNotFoundException("No item found at ".$path);
+                throw new ItemNotFoundException("No item found at ".$path);
             }
             $propertyName = str_replace($nodePath, "", $path);
 
@@ -737,7 +737,7 @@ class Client implements TransportInterface
             $dom = new \DOMDocument('1.0', 'UTF-8');
             $dom->loadXml($xml);
 
-            foreach ($dom->getElementsByTagNameNS('http://www.jcp.org/jcr/sv/1.0', 'property') AS $propertyNode) {
+            foreach ($dom->getElementsByTagNameNS('http://www.jcp.org/jcr/sv/1.0', 'property') as $propertyNode) {
                 if ($propertyName == $propertyNode->getAttribute('sv:name')) {
                     $propertyNode->parentNode->removeChild($propertyNode);
                     break;
@@ -752,10 +752,10 @@ class Client implements TransportInterface
             $params = array($path."%", $this->workspaceId);
 
             $query = "SELECT count(*) FROM phpcr_nodes_foreignkeys fk INNER JOIN phpcr_nodes n ON n.id = fk.target_id " .
-                     "WHERE n.path LIKE ? AND workspace_id = ? AND fk.type = " . \PHPCR\PropertyType::REFERENCE;
+                     "WHERE n.path LIKE ? AND workspace_id = ? AND fk.type = " . PropertyType::REFERENCE;
             $fkReferences = $this->conn->fetchColumn($query, $params);
             if ($fkReferences > 0) {
-                throw new \PHPCR\ReferentialIntegrityException("Cannot delete " . $path . ": A reference points to this node or a subnode.");
+                throw new ReferentialIntegrityException("Cannot delete " . $path . ": A reference points to this node or a subnode.");
             }
 
             $query = "DELETE FROM phpcr_nodes WHERE path LIKE ? AND workspace_id = ?";
@@ -785,7 +785,7 @@ class Client implements TransportInterface
     {
         $this->assertLoggedIn();
 
-        throw new \Jackalope\NotImplementedException("Moving nodes is not yet implemented");
+        throw new NotImplementedException("Moving nodes is not yet implemented");
     }
 
     /**
@@ -809,7 +809,7 @@ class Client implements TransportInterface
      */
     private function validateNode($node, $def)
     {
-        foreach ($def->getDeclaredChildNodeDefinitions() AS $childDef) {
+        foreach ($def->getDeclaredChildNodeDefinitions() as $childDef) {
             /* @var $childDef \PHPCR\NodeType\NodeDefinitionInterface */
             if (!$node->hasNode($childDef->getName())) {
                 if ($childDef->getName() === '*') {
@@ -817,16 +817,16 @@ class Client implements TransportInterface
                 }
 
                 if ($childDef->isMandatory() && !$childDef->isAutoCreated()) {
-                    throw new \PHPCR\RepositoryException(
+                    throw new RepositoryException(
                         "Child " . $child->getName() . " is mandatory, but is not present while ".
                         "saving " . $def->getName() . " at " . $node->getPath()
                     );
                 } elseif ($childDef->isAutoCreated()) {
-                    throw new \Jackalope\NotImplementedException("Auto-creation of child node '".$def->getName()."#".$childDef->getName()."' is not yet supported in DoctrineDBAL transport.");
+                    throw new NotImplementedException("Auto-creation of child node '".$def->getName()."#".$childDef->getName()."' is not yet supported in DoctrineDBAL transport.");
                 }
 
                 if ($node->hasProperty($childDef->getName())) {
-                    throw new \PHPCR\RepositoryException(
+                    throw new RepositoryException(
                         "Node " . $node->getPath() . " has property with name ".
                         $childDef->getName() . " but its node type '". $def->getName() . "' defines a ".
                         "child with this name."
@@ -835,7 +835,7 @@ class Client implements TransportInterface
             }
         }
 
-        foreach ($def->getDeclaredPropertyDefinitions() AS $propertyDef) {
+        foreach ($def->getDeclaredPropertyDefinitions() as $propertyDef) {
             /* @var $propertyDef \PHPCR\NodeType\PropertyDefinitionInterface */
             if ($propertyDef->getName() == '*') {
                 continue;
@@ -843,7 +843,7 @@ class Client implements TransportInterface
 
             if (!$node->hasProperty($propertyDef->getName())) {
                 if ($node->hasNode($propertyDef->getName())) {
-                    throw new \PHPCR\RepositoryException(
+                    throw new RepositoryException(
                         "Node " . $node->getPath() . " has child with name ".
                         $propertyDef->getName() . " but its node type '". $def->getName() . "' defines a ".
                         "property with this name."
@@ -851,7 +851,7 @@ class Client implements TransportInterface
                 }
 
                 if ($propertyDef->isMandatory() && !$propertyDef->isAutoCreated()) {
-                    throw new \PHPCR\RepositoryException(
+                    throw new RepositoryException(
                         "Property " . $propertyDef->getName() . " is mandatory, but is not present while ".
                         "saving " . $def->getName() . " at " . $node->getPath()
                     );
@@ -875,7 +875,7 @@ class Client implements TransportInterface
         array_unshift($nodeTypes, $nodeDef);
         foreach ($nodeTypes as $nodeType) {
             /* @var $nodeType \PHPCR\NodeType\NodeTypeDefinitionInterface */
-            foreach ($nodeType->getDeclaredSupertypes() AS $superType) {
+            foreach ($nodeType->getDeclaredSupertypes() as $superType) {
                 $nodeTypes[] = $superType;
             }
         }
@@ -890,7 +890,7 @@ class Client implements TransportInterface
 
         $nodeTypes = $this->getResponsibleNodeTypes($node);
         $popertyDefs = array();
-        foreach ($nodeTypes AS $nodeType) {
+        foreach ($nodeTypes as $nodeType) {
             /* @var $nodeType \PHPCR\NodeType\NodeTypeDefinitionInterface */
             $this->validateNode($node, $nodeType);
         }
@@ -925,22 +925,22 @@ class Client implements TransportInterface
      */
     private function assertValidPropertyValue($type, $value, $path)
     {
-        if ($type === \PHPCR\PropertyType::NAME) {
+        if ($type === PropertyType::NAME) {
             if (strpos($value, ":") !== false) {
                 list($prefix, $localName) = explode(":", $value);
 
                 $this->getNamespaces();
                 if (!isset($this->namespaces[$prefix])) {
-                    throw new \PHPCR\ValueFormatException("Invalid PHPCR NAME at " . $path . ": The namespace prefix " . $prefix . " does not exist.");
+                    throw new ValueFormatException("Invalid PHPCR NAME at " . $path . ": The namespace prefix " . $prefix . " does not exist.");
                 }
             }
-        } elseif ($type === \PHPCR\PropertyType::PATH) {
+        } elseif ($type === PropertyType::PATH) {
             if (!preg_match('((/[a-zA-Z0-9:_-]+)+)', $value)) {
-                throw new \PHPCR\ValueFormatException("Invalid PATH at " . $path .": Segments are seperated by / and allowed chars are a-zA-Z0-9:_-");
+                throw new ValueFormatException("Invalid PATH at " . $path .": Segments are seperated by / and allowed chars are a-zA-Z0-9:_-");
             }
-        } elseif ($type === \PHPCR\PropertyType::URI) {
+        } elseif ($type === PropertyType::URI) {
             if (!preg_match(self::VALIDATE_URI_RFC3986, $value)) {
-                throw new \PHPCR\ValueFormatException("Invalid URI at " . $path .": Has to follow RFC 3986.");
+                throw new ValueFormatException("Invalid URI at " . $path .": Has to follow RFC 3986.");
             }
         }
     }
@@ -969,7 +969,7 @@ $/xi";
 
         $path = $this->conn->fetchColumn("SELECT path FROM phpcr_nodes WHERE identifier = ? AND workspace_id = ?", array($uuid, $this->workspaceId));
         if (!$path) {
-            throw new \PHPCR\ItemNotFoundException("no item found with uuid ".$uuid);
+            throw new ItemNotFoundException("no item found with uuid ".$uuid);
         }
         return $path;
     }
@@ -981,13 +981,13 @@ $/xi";
 
         $data = PHPCR2StandardNodeTypes::getNodeTypeData();
         $filteredData = array();
-        foreach ($data AS $nodeTypeData) {
+        foreach ($data as $nodeTypeData) {
             if (isset($nodeTypes[$nodeTypeData['name']])) {
                 $filteredData[$nodeTypeData['name']] = $nodeTypeData;
             }
         }
 
-        foreach ($nodeTypes AS $type => $val) {
+        foreach ($nodeTypes as $type => $val) {
             if (!isset($filteredData[$type]) && $result = $this->fetchUserNodeType($type)) {
                 $filteredData[$type] = $result;
             }
@@ -1031,7 +1031,7 @@ $/xi";
         $query = "SELECT * FROM phpcr_type_props WHERE node_type_id = ?";
         $props = $this->conn->fetchAll($query, array($data['node_type_id']));
 
-        foreach ($props AS $propertyData) {
+        foreach ($props as $propertyData) {
             $result['declaredPropertyDefinitions'][] = array(
                 'declaringNodeType' => $data['name'],
                 'name' => $propertyData['name'],
@@ -1059,7 +1059,7 @@ $/xi";
         $query = "SELECT * FROM phpcr_type_childs WHERE node_type_id = ?";
         $childs = $this->conn->fetchAll($query, array($data['node_type_id']));
 
-        foreach ($childs AS $childData) {
+        foreach ($childs as $childData) {
             $result['declaredNodeDefinitions'][] = array(
                 'declaringNodeType' => $data['name'],
                 'name' => $childData['name'],
@@ -1081,13 +1081,13 @@ $/xi";
     // inherit all doc
     public function registerNodeTypesCnd($cnd, $allowUpdate)
     {
-        throw new \Jackalope\NotImplementedException("Not implemented yet");
+        throw new NotImplementedException("Not implemented yet");
     }
 
     // inherit all doc
     public function registerNodeTypes($types, $allowUpdate)
     {
-        foreach ($types AS $type) {
+        foreach ($types as $type) {
             /* @var $type \Jackalope\NodeType\NodeTypeDefinition */
             $this->conn->insert('phpcr_type_nodes', array(
                 'name' => $type->getName(),
@@ -1101,7 +1101,7 @@ $/xi";
             $nodeTypeId = $this->conn->lastInsertId($this->sequenceTypeName);
 
             if ($propDefs = $type->getDeclaredPropertyDefinitions()) {
-                foreach ($propDefs AS $propertyDef) {
+                foreach ($propDefs as $propertyDef) {
                     /* @var $propertyDef \Jackalope\NodeType\PropertyDefinition */
                     $this->conn->insert('phpcr_type_props', array(
                         'node_type_id' => $nodeTypeId,
@@ -1121,7 +1121,7 @@ $/xi";
             }
 
             if ($childDefs = $type->getDeclaredChildNodeDefinitions()) {
-                foreach ($childDefs AS $childDef) {
+                foreach ($childDefs as $childDef) {
                     /* @var $propertyDef \PHPCR\NodeType\NodeDefinitionInterface */
                     $this->conn->insert('phpcr_type_childs', array(
                         'node_type_id' => $nodeTypeId,
@@ -1147,7 +1147,7 @@ $/xi";
     // inherit all doc
     public function cloneFrom($srcWorkspace, $srcAbsPath, $destAbsPath, $removeExisting)
     {
-        throw new \Jackalope\NotImplementedException("Not implemented yet");
+        throw new NotImplementedException("Not implemented yet");
     }
 
     // inherit all doc
@@ -1169,7 +1169,7 @@ $/xi";
             return fopen("data://text/plain,".$data[0]['data'], "r");
         } else {
             $streams = array();
-            foreach ($data AS $row) {
+            foreach ($data as $row) {
                 $streams[$row['idx']] = fopen("data://text/plain,".$row['data'], "r");
             }
             return $streams;
@@ -1179,7 +1179,7 @@ $/xi";
     // inherit all doc
     public function getProperty($path)
     {
-        throw new \Jackalope\NotImplementedException("Not implemented yet");
+        throw new NotImplementedException("Not implemented yet");
     }
 
     // inherit all doc
@@ -1190,32 +1190,37 @@ $/xi";
         $limit = $query->getLimit();
         $offset = $query->getOffset();
 
-        switch ($query->getLanguage()) {
-            case \PHPCR\Query\QueryInterface::JCR_SQL2:
-                $parser = new \PHPCR\Util\QOM\Sql2ToQomQueryConverter(new \Jackalope\Query\QOM\QueryObjectModelFactory());
-                $qom = $parser->parse($query->getStatement());
-
-                $qomWalker = new Query\QOMWalker($this->nodeTypeManager, $this->conn->getDatabasePlatform(), $this->getNamespaces());
-                $sql = $qomWalker->walkQOMQuery($qom);
-
-                $sql = $this->conn->getDatabasePlatform()->modifyLimitQuery($sql, $limit, $offset);
-                $data = $this->conn->fetchAll($sql, array($this->workspaceId));
-
-                $result = array();
-                foreach ($data AS $row) {
-                    $result[] = array(
-                        array('dcr:name' => 'jcr:primaryType', 'dcr:value' => $row['type']),
-                        array('dcr:name' => 'jcr:path', 'dcr:value' => $row['path'], 'dcr:selectorName' => $row['type']),
-                        array('dcr:name' => 'jcr:score', 'dcr:value' => 0)
-                    );
-                }
-
-                return $result;
-            case \PHPCR\Query\QueryInterface::JCR_JQOM:
-                // How do we extrct the QOM from a QueryInterface? We need a non-interface method probably
-                throw new \Jackalope\NotImplementedException("JCQ-JQOM not yet implemented.");
-                break;
+        $language = $query->getLanguage();
+        if ($language === QueryInterface::JCR_SQL2) {
+            $parser = new Sql2ToQomQueryConverter($this->factory->get('Jackalope\Query\QOM\QueryObjectModelFactory'));
+            try {
+                $query = $parser->parse($query->getStatement());
+            } catch (\Exception $e) {
+                throw new InvalidQueryException('Invalid query: '.$query->getStatement());
+            }
+            $language = QueryInterface::JCR_JQOM;
         }
+
+        if ($language === QueryInterface::JCR_JQOM) {
+            $qomWalker = new Query\QOMWalker($this->nodeTypeManager, $this->conn->getDatabasePlatform(), $this->getNamespaces());
+            $sql = $qomWalker->walkQOMQuery($query);
+
+            $sql = $this->conn->getDatabasePlatform()->modifyLimitQuery($sql, $limit, $offset);
+            $data = $this->conn->fetchAll($sql, array($this->workspaceId));
+
+            $result = array();
+            foreach ($data as $row) {
+                $result[] = array(
+                    array('dcr:name' => 'jcr:primaryType', 'dcr:value' => $row['type']),
+                    array('dcr:name' => 'jcr:path', 'dcr:value' => $row['path'], 'dcr:selectorName' => $row['type']),
+                    array('dcr:name' => 'jcr:score', 'dcr:value' => 0)
+                );
+            }
+
+            return $result;
+        }
+
+        throw new NotImplementedException("JCQ-JQOM not yet implemented.");
     }
 
     // inherit all doc
@@ -1250,15 +1255,15 @@ $/xi";
     {
         $targetId = $this->pathExists($path);
 
-        $type = $weakReference ? \PHPCR\PropertyType::WEAKREFERENCE : \PHPCR\PropertyType::REFERENCE;
+        $type = $weakReference ? PropertyType::WEAKREFERENCE : PropertyType::REFERENCE;
 
-        $sql = "SELECT CONCAT(n.path, '/', fk.source_property_name) AS path, fk.source_property_name FROM phpcr_nodes n " .
+        $sql = "SELECT CONCAT(n.path, '/', fk.source_property_name) as path, fk.source_property_name FROM phpcr_nodes n " .
                "INNER JOIN phpcr_nodes_foreignkeys fk ON n.id = fk.source_id ".
                "WHERE fk.target_id = ? AND fk.type = ?";
         $properties = $this->conn->fetchAll($sql, array($targetId, $type));
 
         $references = array();
-        foreach ($properties AS $property) {
+        foreach ($properties as $property) {
             if ($name === null || $property['source_property_name'] == $name) {
                 $references[] = $property['path'];
             }
@@ -1282,7 +1287,26 @@ $/xi";
               && strpos($path, '/../') === false
               && preg_match('/^[\w{}\/#:^+~*\[\]\. -]*$/i', $path))
         ) {
-            throw new \PHPCR\RepositoryException('Path is not well-formed or contains invalid characters: ' . $path);
+            throw new RepositoryException('Path is not well-formed or contains invalid characters: ' . $path);
         }
     }
+
+    // TODO: remove once transport is split
+    public function checkinItem($path)
+    {
+        throw new NotImplementedException();
+    }
+    public function checkoutItem($path)
+    {
+        throw new NotImplementedException();
+    }
+    public function restoreItem($removeExisting, $versionPath, $path)
+    {
+        throw new NotImplementedException();
+    }
+    public function getVersionHistory($path)
+    {
+        throw new NotImplementedException();
+    }
+
 }

@@ -6,7 +6,7 @@
  * @author Benjamin Eberlei <kontakt@beberlei.de>
  */
 
-require_once __DIR__ . "/../lib/phpcr/src/PHPCR/Util/UUIDHelper.php";
+require_once __DIR__ . "/../lib/phpcr-utils/src/PHPCR/Util/UUIDHelper.php";
 
 $srcDir = __DIR__ . "/phpcr-api/fixtures";
 $destDir = __DIR__ . "/fixtures/doctrine";
@@ -30,7 +30,7 @@ $rdi = new RecursiveDirectoryIterator($srcDir);
 $ri = new RecursiveIteratorIterator($rdi);
 
 libxml_use_internal_errors(true);
-foreach ($ri AS $file) {
+foreach ($ri as $file) {
     if (!$file->isFile()) { continue; }
 
     $newFile = str_replace($srcDir, $destDir, $file->getPathname());
@@ -58,6 +58,8 @@ foreach ($ri AS $file) {
             'id' => $nodeId++,
             'path' => '/',
             'parent' => '',
+            'local_name' => '',
+            'namespace' => '',
             'workspace_id' => 1,
             'identifier' => $id,
             'type' => 'nt:unstructured',
@@ -79,7 +81,7 @@ foreach ($ri AS $file) {
         ));
         $nodeIds[$id] = $nodeId;
 
-        foreach ($nodes AS $node) {
+        foreach ($nodes as $node) {
             /* @var $node DOMElement */
             $parent = $node;
             $path = "";
@@ -91,12 +93,12 @@ foreach ($ri AS $file) {
             } while ($parent instanceof DOMElement);
 
             $attrs = array();
-            foreach ($node->childNodes AS $child) {
+            foreach ($node->childNodes as $child) {
                 if ($child instanceof DOMElement && $child->tagName == "sv:property") {
                     $name = $child->getAttributeNS('http://www.jcp.org/jcr/sv/1.0', 'name');
 
                     $value = array();
-                    foreach ($child->getElementsByTagNameNS('http://www.jcp.org/jcr/sv/1.0', 'value') AS $nodeValue) {
+                    foreach ($child->getElementsByTagNameNS('http://www.jcp.org/jcr/sv/1.0', 'value') as $nodeValue) {
                         $value[] = $nodeValue->nodeValue;
                     }
 
@@ -138,7 +140,7 @@ foreach ($ri AS $file) {
             $dom->appendChild($rootNode);
 
             $binaryData = null;
-            foreach ($attrs AS $attr => $valueData) {
+            foreach ($attrs as $attr => $valueData) {
                 if ($attr == "jcr:uuid") {
                     continue;
                 }
@@ -152,7 +154,7 @@ foreach ($ri AS $file) {
                     $propertyNode->setAttribute('sv:type', $jcrTypeConst); // TODO: Name! not int
                     $propertyNode->setAttribute('sv:multi-valued', $valueData['multiValued'] ? "1" : "0");
 
-                    foreach ($valueData['value'] AS $value) {
+                    foreach ($valueData['value'] as $value) {
                         switch ($valueData['type']) {
                             case 'binary':
                                 $binaryData = base64_decode($value);
@@ -213,10 +215,19 @@ foreach ($ri AS $file) {
             if (!$parent) {
                 $parent = '/';
             }
+
+            if (strpos(':', $attr)) {
+                list($namespace, $local_name) = explode(':', $attr);
+            } else {
+                $namespace = '';
+                $local_name = $attr;
+            }
             $dataSetBuilder->addRow('phpcr_nodes', array(
                 'id' => $nodeId,
                 'path' => $path,
                 'parent' => $parent,
+                'local_name' => $local_name,
+                'namespace' => $namespace,
                 'workspace_id' => 1,
                 'identifier' => $id,
                 'type' => $attrs['jcr:primaryType']['value'][0],
@@ -252,7 +263,7 @@ class PHPUnit_Extensions_Database_XmlDataSetBuilder
         if (!isset($this->tables[$tableName])) {
             $table = $this->dom->createElement('table');
             $table->setAttribute('name', $tableName);
-            foreach ($data AS $k => $v) {
+            foreach ($data as $k => $v) {
                 $table->appendChild($this->dom->createElement('column', $k));
             }
             $this->tables[$tableName] = $table;
@@ -260,7 +271,7 @@ class PHPUnit_Extensions_Database_XmlDataSetBuilder
         }
 
         $row = $this->dom->createElement('row');
-        foreach ($data AS $k => $v) {
+        foreach ($data as $k => $v) {
             if ($v === null) {
                 $row->appendChild($this->dom->createElement('null'));
             } else {
