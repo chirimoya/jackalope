@@ -9,39 +9,42 @@ if (method_exists('PHPUnit_Util_Filter', 'addDirectoryToFilter')) {
 }
 
 /**
- * Bootstrap file for jackalope mongodb
+ * Bootstrap file for jackalope mongodb tests
+ *
+ * If you want to overwrite the defaults, you can to specify the autoloader and doctrine sources
  */
-
-// Make sure we have the necessary config
-$necessaryConfigValues = array(
-    'phpcr.doctrine.loader', 
-    'phpcr.doctrine.commondir', 
-    'phpcr.doctrine.mongodbdir', 
-    'phpcr.doctrine.mongodb.server',
-    'phpcr.doctrine.mongodb.dbname',
-);
-foreach ($necessaryConfigValues as $val) {
-    if (empty($GLOBALS[$val])) {
-        die('Please set '.$val.' in your phpunit.xml.' . "\n");
+if (isset($GLOBALS['phpcr.doctrine.loader'])) {
+    require_once $GLOBALS['phpcr.doctrine.loader'];
+    // Make sure we have the necessary config
+    $necessaryConfigValues = array(
+        'phpcr.doctrine.loader',
+        'phpcr.doctrine.commondir',
+        'phpcr.doctrine.mongodbdir',
+        'phpcr.doctrine.mongodb.server',
+        'phpcr.doctrine.mongodb.dbname',
+    );
+    
+    foreach ($necessaryConfigValues as $val) {
+        if (empty($GLOBALS[$val])) {
+            die('Please set '.$val.' in your phpunit.xml.' . "\n");
+        }
     }
+    
+    $loader = new \Doctrine\Common\ClassLoader("Doctrine\Common", $GLOBALS['phpcr.doctrine.commondir']);
+    $loader->register();
+
+    $loader = new \Doctrine\Common\ClassLoader("Doctrine\MongoDB", $GLOBALS['phpcr.doctrine.mongodbdir']);
+    $loader->register();
 }
-
-require_once($GLOBALS['phpcr.doctrine.loader']);
-
-$loader = new \Doctrine\Common\ClassLoader("Doctrine\Common", $GLOBALS['phpcr.doctrine.commondir']);
-$loader->register();
-
-$loader = new \Doctrine\Common\ClassLoader("Doctrine\MongoDB", $GLOBALS['phpcr.doctrine.mongodbdir']);
-$loader->register();
 
 /** 
  * autoloader: jackalope-api-tests relies on an autoloader.
  */
-require_once(dirname(__FILE__) . '/../src/Jackalope/autoloader.php');
+require_once(dirname(__FILE__) . '/../src/autoload.mongodb.dist.php');
 
 ### Load classes needed for jackalope unit tests ###
 require 'Jackalope/TestCase.php';
-require 'Jackalope/Transport/Jackrabbit/DavexTestCase.php';
+require 'Jackalope/Transport/Jackrabbit/JackrabbitTestCase.php';
 require 'Jackalope/Transport/DoctrineDBAL/DoctrineDBALTestCase.php';
 require 'Jackalope/Transport/MongoDB/MongoDBTestCase.php';
 
