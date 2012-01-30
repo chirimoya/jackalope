@@ -1,12 +1,32 @@
 <?php
+
 namespace Jackalope\Transport\Jackrabbit;
 
+use DOMDocument;
+
+use PHPCR\CredentialsInterface;
+use PHPCR\SimpleCredentials;
+use PHPCR\RepositoryException;
+use PHPCR\NoSuchWorkspaceException;
+use PHPCR\ItemNotFoundException;
+use PHPCR\PathNotFoundException;
+use PHPCR\ReferentialIntegrityException;
+use PHPCR\NodeType\ConstraintViolationException;
+use PHPCR\NodeType\NoSuchNodeTypeException;
+
 use Jackalope\Transport\curl;
+use Jackalope\FactoryInterface;
 
 /**
  * Request class for the Davex protocol
  *
  * @license http://www.apache.org/licenses/LICENSE-2.0  Apache License Version 2.0, January 2004
+ *
+ * @author Christian Stocker <chregu@liip.ch>
+ * @author David Buchmann <david@liip.ch>
+ * @author Roland Schilter <roland.schilter@liip.ch>
+ * @author Jordi Boggiano <j.boggiano@seld.be>
+ * @author Lukas Kahwe Smith <smith@pooteeweet.org>
  */
 class Request
 {
@@ -116,7 +136,12 @@ class Request
     const INFINITY = 'infinity';
 
     /**
-     * @var \Jackalope\Transport\curl
+     * @var Client
+     */
+    protected $client;
+
+    /**
+     * @var curl
      */
     protected $curl;
 
@@ -134,7 +159,7 @@ class Request
 
     /**
      * Set of credentials necessary to connect to the server or else.
-     * @var \PHPCR\CredentialsInterface
+     * @var CredentialsInterface
      */
     protected $credentials;
 
@@ -173,46 +198,88 @@ class Request
     protected $transactionId = false;
 
     /**
+     * Whether we already did a version check in handling an error.
+     * Doing this once per php process is enough.
+     *
+     * @var bool
+     */
+    static protected $versionChecked = false;
+
+    /**
      * Initiaties the NodeTypes request object.
      *
-     * @param object $factory Ignored for now, as this class does not create objects
-     * TODO: document other parameters
+     * @param FactoryInterface $factory Ignored for now, as this class does not create objects
+     * @param Client $client The jackrabbit client instance
+     * @param curl $curl The cURL object to use in this request
+     * @param string $method the HTTP method to use, one of the class constants
+     * @param string|array $uri the remote url for this request, including protocol,
+     *      host name, workspace and path to the object to manipulate. May be an array of uri
      */
-    public function __construct($factory, $curl, $method, $uri)
+    public function __construct(FactoryInterface $factory, Client $client, curl $curl, $method, $uri)
     {
+        $this->client = $client;
         $this->curl = $curl;
-        $this->method = $method;
+        $this->setMethod($method);
         $this->setUri($uri);
     }
 
-    public function setCredentials($creds)
+    /**
+     * Set the credentials for the request. Setting them to null will make a
+     * request without authentication header.
+     *
+     * @param CredentialsInterface $creds the credentials to use in the request.
+     */
+    public function setCredentials(CredentialsInterface $creds = null)
     {
         $this->credentials = $creds;
     }
 
+    /**
+     * Set a different content type for this request. The default is text/xml in utf-8
+     *
+     * @param string $contentType
+     */
     public function setContentType($contentType)
     {
         $this->contentType = (string) $contentType;
     }
 
     /**
-     * @param int|string  $depth
+     * Set the depth to which nodes should be fetched.
+     *
+     * To support more than 0, we need to implement more logic in parsing
+     * the response too.
+     *
+     * @param int|string $depth
      */
     public function setDepth($depth)
     {
         $this->depth = $depth;
     }
 
+    /**
+     * Set the request body
+     *
+     * @param string $body
+     */
     public function setBody($body)
     {
         $this->body = (string) $body;
     }
 
+    /**
+     * Set or update the HTTP method to be used in this request.
+     *
+     * @param string $method the HTTP method to use, one of the class constants
+     */
     public function setMethod($method)
     {
         $this->method = $method;
     }
 
+    /**
+     * @param string|array $uri the request target
+     */
     public function setUri($uri)
     {
         if (!is_array($uri)) {
@@ -222,16 +289,31 @@ class Request
         }
     }
 
+    /**
+     * add an additional http header
+     *
+     * @param string $header HTTP header
+     */
     public function addHeader($header)
     {
         $this->additionalHeaders[] = $header;
     }
 
+    /**
+     * Set the transaction lock token to be used with this request
+     *
+     * @param string $lockToken the transaction lock
+     */
     public function setLockToken($lockToken)
     {
         $this->lockToken = (string) $lockToken;
     }
 
+    /**
+     * Set the transaction identifier to be used in this request
+     *
+     * @param string $transactionId
+     */
     public function setTransactionId($transactionId)
     {
         $this->transactionId = (string) $transactionId;
@@ -239,10 +321,13 @@ class Request
 
     /**
      * used by multiCurl with fresh curl instances
+     *
+     * @param curl $curl
+     * @param bool $getCurlObject whether to return the curl object instead of the response
      */
-    protected function prepareCurl($curl, $getCurlObject)
+    protected function prepareCurl(curl $curl, $getCurlObject)
     {
-        if ($this->credentials instanceof \PHPCR\SimpleCredentials) {
+        if ($this->credentials instanceof SimpleCredentials) {
             $curl->setopt(CURLOPT_USERPWD, $this->credentials->getUserID().':'.$this->credentials->getPassword());
         }
         // otherwise leave this alone, the new curl instance has no USERPWD yet
@@ -279,7 +364,8 @@ class Request
      * Prepares the curl object, executes it and checks
      * for transport level errors, throwing the appropriate exceptions.
      *
-     * @param bool $getCurlObject if to return the curl object instead of the response
+     * @param bool $getCurlObject wheter to return the curl object instead of the response
+     * @param bool $forceMultiple whether to force parallel requests or not
      *
      * @return string|array of XML representation of the response.
      */
@@ -294,7 +380,7 @@ class Request
     /**
      * Requests the data for multiple requests
      *
-     * @param bool $getCurlObject if to return the curl object instead of the response
+     * @param bool $getCurlObject whether to return the curl object instead of the response
      *
      * @return array of XML representations of responses or curl objects.
      */
@@ -345,13 +431,13 @@ class Request
     /**
      * Requests the data for a single requests
      *
-     * @param bool $getCurlObject if to return the curl object instead of the response
+     * @param bool $getCurlObject whether to return the curl object instead of the response
      *
      * @return string XML representation of a response or curl object.
      */
     protected function singleRequest($getCurlObject)
     {
-        if ($this->credentials instanceof \PHPCR\SimpleCredentials) {
+        if ($this->credentials instanceof SimpleCredentials) {
             $this->curl->setopt(CURLOPT_USERPWD, $this->credentials->getUserID().':'.$this->credentials->getPassword());
             $curl = $this->curl;
         } else {
@@ -380,6 +466,8 @@ class Request
         $curl->setopt(CURLOPT_URL, reset($this->uri));
         $curl->setopt(CURLOPT_HTTPHEADER, $headers);
         $curl->setopt(CURLOPT_POSTFIELDS, $this->body);
+        // TODO: uncomment next line to get verbose information from CURL
+        //$curl->setopt(CURLOPT_VERBOSE, 1);
         if ($getCurlObject) {
             $curl->parseResponseHeaders();
         }
@@ -400,26 +488,47 @@ class Request
     /**
      * Handles errors caused by singleRequest and multiRequest
      *
-     * for transport level errors, throwing the appropriate exceptions.
-     * @throws \PHPCR\NoSuchWorkspaceException if it was not possible to reach the server (resolve host or connect)
-     * @throws \PHPCR\ItemNotFoundException if the object was not found
-     * @throws \PHPCR\RepositoryExceptions if on any other error.
-     * @throws \PHPCR\PathNotFoundException if the path was not found (server returned 404 without xml response)
+     * For transport level errors, tries to figure out what went wrong to
+     * throw the most appropriate exception.
+     *
+     * @param curl $curl
+     * @param string $response the response body
+     * @param int $httpCode the http response code
+     *
+     * @throws NoSuchWorkspaceException if it was not possible to reach the server (resolve host or connect)
+     * @throws ItemNotFoundException if the object was not found
+     * @throws RepositoryExceptions if on any other error.
+     * @throws PathNotFoundException if the path was not found (server returned 404 without xml response)
      *
      */
-    protected function handleError($curl, $response, $httpCode)
+    protected function handleError(curl $curl, $response, $httpCode)
     {
+        // first: check if the backend is too old for us
+        if (! self::$versionChecked) {
+            // avoid endless loops.
+            self::$versionChecked = true;
+            try {
+                // getting the descriptors triggers a version check
+                $this->client->getRepositoryDescriptors();
+            } catch(\Exception $e) {
+                if ($e instanceof \PHPCR\UnsupportedRepositoryOperationException) {
+                    throw $e;
+                }
+                //otherwise ignore exception here as to not confuse what happened
+            }
+        }
+
         switch ($curl->errno()) {
             case CURLE_COULDNT_RESOLVE_HOST:
             case CURLE_COULDNT_CONNECT:
-                throw new \PHPCR\NoSuchWorkspaceException($curl->error());
+                throw new NoSuchWorkspaceException($curl->error());
         }
 
         // TODO extract HTTP status string from response, more descriptive about error
 
         // use XML error response if it's there
         if (substr($response, 0, 1) === '<') {
-            $dom = new \DOMDocument();
+            $dom = new DOMDocument();
             $dom->loadXML($response);
             $err = $dom->getElementsByTagNameNS(Client::NS_DCR, 'exception');
             if ($err->length > 0) {
@@ -430,15 +539,15 @@ class Request
                 $exceptionMsg = 'HTTP ' . $httpCode . ': ' . $errMsg;
                 switch($errClass) {
                     case 'javax.jcr.NoSuchWorkspaceException':
-                        throw new \PHPCR\NoSuchWorkspaceException($exceptionMsg);
+                        throw new NoSuchWorkspaceException($exceptionMsg);
                     case 'javax.jcr.nodetype.NoSuchNodeTypeException':
-                        throw new \PHPCR\NodeType\NoSuchNodeTypeException($exceptionMsg);
+                        throw new NoSuchNodeTypeException($exceptionMsg);
                     case 'javax.jcr.ItemNotFoundException':
-                        throw new \PHPCR\ItemNotFoundException($exceptionMsg);
+                        throw new ItemNotFoundException($exceptionMsg);
                     case 'javax.jcr.nodetype.ConstraintViolationException':
-                        throw new \PHPCR\NodeType\ConstraintViolationException($exceptionMsg);
+                        throw new ConstraintViolationException($exceptionMsg);
                     case 'javax.jcr.ReferentialIntegrityException':
-                        throw new \PHPCR\ReferentialIntegrityException($exceptionMsg);
+                        throw new ReferentialIntegrityException($exceptionMsg);
                     //TODO: Two more errors needed for Transactions. How does the corresponding Jackrabbit response look like?
                     // javax.transaction.RollbackException => \PHPCR\Transaction\RollbackException
                     // java.lang.SecurityException => \PHPCR\AccessDeniedException
@@ -455,22 +564,22 @@ class Request
                         if (class_exists($class)) {
                             throw new $class($exceptionMsg);
                         }
-                        throw new \PHPCR\RepositoryException($exceptionMsg . " ($errClass)");
+                        throw new RepositoryException($exceptionMsg . " ($errClass)");
                 }
             }
         }
         if (404 === $httpCode) {
-            throw new \PHPCR\PathNotFoundException("HTTP 404 Path Not Found: {$this->method} ".var_export($this->uri, true));
+            throw new PathNotFoundException("HTTP 404 Path Not Found: {$this->method} ".var_export($this->uri, true));
         } elseif (405 == $httpCode) {
             throw new HTTPErrorException("HTTP 405 Method Not Allowed: {$this->method} ".var_export($this->uri, true), 405);
         } elseif ($httpCode >= 500) {
-            throw new \PHPCR\RepositoryException("HTTP $httpCode Error from backend on: {$this->method} ".var_export($this->uri, true)."\n\n$response");
+            throw new RepositoryException("HTTP $httpCode Error from backend on: {$this->method} ".var_export($this->uri, true)."\n\n$response");
         }
 
         $curlError = $curl->error();
 
         $msg = "Unexpected error: \nCURL Error: $curlError \nResponse (HTTP $httpCode): {$this->method} ".var_export($this->uri, true)."\n\n$response";
-        throw new \PHPCR\RepositoryException($msg);
+        throw new RepositoryException($msg);
     }
 
     /**
@@ -479,6 +588,8 @@ class Request
      * Returns a DOMDocument from the backend or throws exception.
      * Does error handling for both connection errors and dcr:exception response
      *
+     * @param bool $forceMultiple whether to force parallel requests or not
+     *
      * @return DOMDocument The loaded XML response text.
      */
     public function executeDom($forceMultiple = false)
@@ -486,7 +597,7 @@ class Request
         $xml = $this->execute(null, $forceMultiple);
 
         // create new DOMDocument and load the response text.
-        $dom = new \DOMDocument();
+        $dom = new DOMDocument();
         $dom->loadXML($xml);
 
         return $dom;
@@ -497,9 +608,11 @@ class Request
      *
      * Returns a decoded json string from the backend or throws exception
      *
+     * @param bool $forceMultiple whether to force parallel requests or not
+     *
      * @return mixed
      *
-     * @throws \PHPCR\RepositoryException if the json response is not valid
+     * @throws RepositoryException if the json response is not valid
      */
     public function executeJson($forceMultiple = false)
     {
@@ -514,7 +627,7 @@ class Request
             $json[$key] = json_decode($response);
             if (null === $json[$key] && 'null' !== strtolower($response)) {
                 $uri = reset($this->uri); // FIXME was $this->uri[$key]. at which point did we lose the right key?
-                throw new \PHPCR\RepositoryException("Not a valid json object: \nRequest: {$this->method} $uri \nResponse: \n$response");
+                throw new RepositoryException("Not a valid json object: \nRequest: {$this->method} $uri \nResponse: \n$response");
             }
         }
         //TODO: are there error responses in json format? if so, handle them

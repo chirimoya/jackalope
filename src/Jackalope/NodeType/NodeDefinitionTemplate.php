@@ -1,20 +1,26 @@
 <?php
+
 namespace Jackalope\NodeType;
 
-// inherit all doc
+use PHPCR\NodeType\NodeDefinitionTemplateInterface;
+use PHPCR\Version\OnParentVersionAction;
+
+use Jackalope\FactoryInterface;
+
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\NodeDefinitionTemplateInterface
+class NodeDefinitionTemplate extends NodeDefinition implements NodeDefinitionTemplateInterface
 {
     /**
      * Create a new node definition template instance.
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param NodeTypeManager $nodeTypeManager
      */
-    public function __construct($factory, NodeTypeManager $nodeTypeManager)
+    public function __construct(FactoryInterface $factory, NodeTypeManager $nodeTypeManager)
     {
         $this->factory = $factory;
         $this->nodeTypeManager = $nodeTypeManager;
@@ -23,15 +29,16 @@ class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\N
         $this->name = null;
         $this->isAutoCreated = false;
         $this->isMandatory = false;
-        $this->onParentVersion = \PHPCR\Version\OnParentVersionAction::COPY;
+        $this->onParentVersion = OnParentVersionAction::COPY;
         $this->isProtected = false;
         $this->requiredPrimaryTypeNames = null;
         $this->defaultPrimaryTypeName = null;
         $this->allowsSameNameSiblings = false;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setName($name)
@@ -39,8 +46,9 @@ class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\N
         $this->name = $name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setAutoCreated($autoCreated)
@@ -48,8 +56,9 @@ class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\N
         $this->isAutoCreated = $autoCreated;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setMandatory($mandatory)
@@ -57,8 +66,9 @@ class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\N
         $this->isMandatory = $mandatory;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setOnParentVersion($opv)
@@ -66,8 +76,9 @@ class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\N
         $this->onParentVersion = $opv;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setProtected($protectedStatus)
@@ -75,8 +86,9 @@ class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\N
         $this->isProtected = $protectedStatus;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setRequiredPrimaryTypeNames(array $requiredPrimaryTypeNames)
@@ -84,8 +96,9 @@ class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\N
         $this->requiredPrimaryTypeNames = $requiredPrimaryTypeNames;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setDefaultPrimaryTypeName($defaultPrimaryTypeName)
@@ -93,14 +106,14 @@ class NodeDefinitionTemplate extends NodeDefinition implements \PHPCR\NodeType\N
         $this->defaultPrimaryTypeName = $defaultPrimaryTypeName;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setSameNameSiblings($allowSameNameSiblings)
     {
         $this->allowsSameNameSiblings = $allowSameNameSiblings;
     }
-
 }
 

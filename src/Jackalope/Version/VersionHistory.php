@@ -3,18 +3,33 @@
 namespace Jackalope\Version;
 
 use ArrayIterator;
-use Jackalope\NotImplementedException;
-use Jackalope\ObjectManager;
 
-// inherit all doc
+use PHPCR\Version\VersionInterface;
+use PHPCR\Version\VersionException;
+
+use Jackalope\Node;
+use Jackalope\ObjectManager;
+use Jackalope\NotImplementedException;
+use Jackalope\FactoryInterface;
+
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class VersionHistory extends \Jackalope\Node
+class VersionHistory extends Node
 {
     protected $objectmanager; //TODO if we would use parent constructor, this would be present
     protected $path; //TODO if we would use parent constructor, this would be present
 
+    /**
+     * @var PHPCR\Version\VersionInterface
+     */
+    protected $versionNode = null;
+    /**
+     * @var PHPCR\Version\VersionInterface
+     */
+    protected $rootVersion = null;
     /**
      * Cache of all versions to only fetch them once.
      * @var array
@@ -23,33 +38,48 @@ class VersionHistory extends \Jackalope\Node
 
     /**
      * FIXME: is this sane? we do not call the parent constructor
+     *
+     * @param FactoryInterface $factory the object factory
+     * @param ObjectManager $objectmanager
+     * @param string $absPath the repository path of this version history.
      */
-    public function __construct($factory, ObjectManager $objectmanager,$absPath)
+    public function __construct(FactoryInterface $factory, ObjectManager $objectmanager, $absPath)
     {
         $this->objectmanager = $objectmanager;
         $this->path = $absPath;
+
+        // will trigger exception required by VersionManager.getVersionHistory
+        // in case there is no such node or it is not versionable
+        $uuid = $this->objectmanager->getVersionHistory($this->path);
+        $this->versionNode = $this->objectmanager->getNode($uuid, '/', 'Version\\Version');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getVersionableIdentifier()
     {
-        throw new NotImplementedException();
+        return $this->versionNode->getPropertyValue('jcr:versionableUuid');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getRootVersion()
     {
-        throw new NotImplementedException();
+        if (! $this->rootVersion) {
+            $this->rootVersion = $this->objectmanager->getNode('jcr:rootVersion', $this->versionNode->getPath(), 'Version\\Version');
+        }
+        return $this->rootVersion;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAllLinearVersions()
@@ -57,19 +87,17 @@ class VersionHistory extends \Jackalope\Node
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAllVersions()
     {
         if (!$this->versions) {
-            $uuid = $this->objectmanager->getVersionHistory($this->path);
-            $node = $this->objectmanager->getNode($uuid, '/', 'Version\Version');
-            $results = array();
-            $rootNode = $this->objectmanager->getNode('jcr:rootVersion', $node->getPath(), 'Version\Version');
-            $results[$rootNode->getName()] = $rootNode;
-            $this->versions = array_merge($results, $this->getEventualSuccessors($rootNode));
+            $rootVersion = $this->getRootVersion();
+            $results[$rootVersion->getName()] = $rootVersion;
+            $this->versions = array_merge($results, $this->getEventualSuccessors($rootVersion));
         }
         return new ArrayIterator($this->versions);
     }
@@ -79,10 +107,10 @@ class VersionHistory extends \Jackalope\Node
      *
      * According to spec, 3.13.1.4, these are called eventual successors
      *
-     * @param \PHPCR\Version\VersionInterface $node the node to get successors
+     * @param VersionInterface $node the node to get successors
      *      from
      *
-     * @return array list of \PHPCR\VersionInterface
+     * @return array list of VersionInterface
      */
     protected function getEventualSuccessors($node)
     {
@@ -95,8 +123,9 @@ class VersionHistory extends \Jackalope\Node
         return $results;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAllLinearFrozenNodes()
@@ -104,8 +133,9 @@ class VersionHistory extends \Jackalope\Node
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAllFrozenNodes()
@@ -113,8 +143,9 @@ class VersionHistory extends \Jackalope\Node
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getVersion($versionName)
@@ -124,11 +155,12 @@ class VersionHistory extends \Jackalope\Node
             return $this->versions[$versionName];
         }
 
-        throw new \PHPCR\Version\VersionException("No version '$versionName'");
+        throw new VersionException("No version '$versionName'");
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getVersionByLabel($label)
@@ -136,8 +168,9 @@ class VersionHistory extends \Jackalope\Node
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function addVersionLabel($versionName, $label, $moveLabel)
@@ -145,8 +178,9 @@ class VersionHistory extends \Jackalope\Node
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function removeVersionLabel($label)
@@ -154,8 +188,9 @@ class VersionHistory extends \Jackalope\Node
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function hasVersionLabel($label, $version = null)
@@ -163,8 +198,9 @@ class VersionHistory extends \Jackalope\Node
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getVersionLabels($version = null)
@@ -172,19 +208,56 @@ class VersionHistory extends \Jackalope\Node
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function removeVersion($versionName)
     {
-        /*
-         * this should send an immediate request with
-         * DELETE /server/tests/jcr%3aroot/jcr%3asystem/jcr%3aversionStorage/88/f5/0e/88f50ee0-38fc-4cab-8ef1-706fb2f78cfe/1.4
-         * ...
-         * using the full path of the version node that is to be removed.
-         */
-        throw new NotImplementedException();
+        $uuid = $this->objectmanager->getVersionHistory($this->path);
+        $historyNode = $this->objectmanager->getNode($uuid, '/', 'Version\\Version');
+
+        try {
+            $version = $this->objectmanager->getNodeByPath($historyNode->getPath().'/'.$versionName, 'Version\\Version');
+        } catch (\PHPCR\ItemNotFoundException $e) {
+            throw new VersionException("No version $versionName in the history", $e->getCode(), $e);
+        }
+
+        // only set other versions dirty if they are cached, no need to load them from backend just to tell they need to be reloaded
+        if ($version->hasProperty('jcr:predecessors')) {
+            foreach ($version->getProperty('jcr:predecessors')->getString() as $preuuid) {
+                $pre = $this->objectmanager->getCachedNodeByUuid($preuuid, 'Version\\Version');
+                if ($pre) {
+                    $pre->setDirty();
+                }
+            }
+        }
+        if ($version->hasProperty('jcr:successor')) {
+            foreach($version->getProperty('jcr:successor')->getString() as $postuuid) {
+                $post = $this->objectmanager->getCachedNodeByUuid($postuuid, 'Version\\Version');
+                if ($post) {
+                    $post->setDirty();
+                }
+            }
+        }
+
+
+        $this->objectmanager->removeVersion($historyNode->getPath(), $versionName);
+
+        if (!is_null($this->versions)) {
+            unset($this->versions[$versionName]);
+        }
+    }
+
+    /**
+     * Tell the version history that it needs to reload, i.e. after a checkin operation
+     *
+     * @private
+     */
+    public function notifyHistoryChanged()
+    {
+        $this->versions = null;
     }
 
 }

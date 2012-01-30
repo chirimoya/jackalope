@@ -1,26 +1,33 @@
 <?php
 namespace Jackalope\NodeType;
 
-// inherit all doc
+use PHPCR\PropertyType;
+
+use PHPCR\Version\OnParentVersionAction;
+use PHPCR\NodeType\PropertyDefinitionTemplateInterface;
+
+use Jackalope\FactoryInterface;
+
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\NodeType\PropertyDefinitionTemplateInterface
+class PropertyDefinitionTemplate extends PropertyDefinition implements PropertyDefinitionTemplateInterface
 {
     /**
      * Create a new property definition template.
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param NodeTypeManager $nodeTypeManager
      */
-    public function __construct($factory, NodeTypeManager $nodeTypeManager)
+    public function __construct(FactoryInterface $factory, NodeTypeManager $nodeTypeManager)
     {
         $this->factory = $factory;
         $this->nodeTypeManager = $nodeTypeManager;
 
         // initialize empty values
-        $this->requiredType = \PHPCR\PropertyType::STRING;
+        $this->requiredType = PropertyType::STRING;
         $this->valueConstraints = null;
         $this->defaultValues = null;
         $this->isMultiple = false;
@@ -30,12 +37,13 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->name = null;
         $this->isAutoCreated = false;
         $this->isMandatory = false;
-        $this->onParentVersion = \PHPCR\Version\OnParentVersionAction::COPY;
+        $this->onParentVersion = OnParentVersionAction::COPY;
         $this->isProtected = false;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setName($name)
@@ -43,8 +51,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->name = $name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setAutoCreated($autoCreated)
@@ -52,8 +61,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->isAutoCreated = $autoCreated;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setMandatory($mandatory)
@@ -61,8 +71,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->isMandatory = $mandatory;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setOnParentVersion($opv)
@@ -70,8 +81,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->onParentVersion = $opv;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setProtected($protectedStatus)
@@ -79,8 +91,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->isProtected;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setRequiredType($type)
@@ -88,8 +101,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->requiredType = $type;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setValueConstraints(array $constraints)
@@ -97,9 +111,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->valueConstraints = $constraints;
     }
 
-
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setDefaultValues(array $defaultValues)
@@ -107,8 +121,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->defaultValues = $defaultValues;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setMultiple($multiple)
@@ -116,8 +131,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->isMultiple = $multiple;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setAvailableQueryOperators(array $operators)
@@ -125,8 +141,9 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->availableQueryOperators = $operators;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setFullTextSearchable($fullTextSearchable)
@@ -134,13 +151,13 @@ class PropertyDefinitionTemplate extends PropertyDefinition implements \PHPCR\No
         $this->isFullTextSearchable = $fullTextSearchable;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setQueryOrderable($queryOrderable)
     {
         $this->isQueryOrderable = $queryOrderable;
     }
-
 }

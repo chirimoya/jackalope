@@ -1,15 +1,23 @@
 <?php
-namespace Jackalope\NodeType;
-use \ArrayObject;
 
-// inherit all doc
+namespace Jackalope\NodeType;
+
+use ArrayObject;
+
+use PHPCR\NodeType\NodeTypeTemplateInterface;
+
+
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeTemplateInterface
+class NodeTypeTemplate extends NodeTypeDefinition implements NodeTypeTemplateInterface
 {
-    // inherit all doc
+
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setName($name)
@@ -17,8 +25,9 @@ class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\Nod
         $this->name = $name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setDeclaredSuperTypeNames(array $names)
@@ -26,8 +35,9 @@ class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\Nod
         $this->declaredSuperTypeNames = $names;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setAbstract($abstractStatus)
@@ -35,8 +45,9 @@ class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\Nod
         $this->isAbstract = $abstractStatus;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setMixin($mixin)
@@ -44,8 +55,9 @@ class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\Nod
         $this->isMixin = $mixin;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setOrderableChildNodes($orderable)
@@ -53,8 +65,9 @@ class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\Nod
         $this->hasOrderableChildNodes = $orderable;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setPrimaryItemName($name)
@@ -62,8 +75,9 @@ class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\Nod
         $this->primaryItemName = $name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setQueryable($queryable)
@@ -71,8 +85,9 @@ class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\Nod
         $this->isQueryable = $queryable;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPropertyDefinitionTemplates()
@@ -83,8 +98,9 @@ class NodeTypeTemplate extends NodeTypeDefinition implements \PHPCR\NodeType\Nod
         return $this->declaredPropertyDefinitions;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNodeDefinitionTemplates()

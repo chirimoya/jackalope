@@ -1,18 +1,24 @@
 <?php
+
 namespace Jackalope\NodeType;
 
-use Jackalope\Helper;
-use \DOMElement;
+use DOMElement;
 
-// inherit all doc
+use PHPCR\NodeType\ItemDefinitionInterface;
+
+use Jackalope\Helper;
+use Jackalope\FactoryInterface;
+
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class ItemDefinition implements \PHPCR\NodeType\ItemDefinitionInterface
+class ItemDefinition implements ItemDefinitionInterface
 {
     /**
      * The factory to instantiate objects
-     * @var \Jackalope\Factory
+     * @var FactoryInterface
      */
     protected $factory;
 
@@ -57,12 +63,11 @@ class ItemDefinition implements \PHPCR\NodeType\ItemDefinitionInterface
      *
      *  TODO: document this format. Property and Node add more to this.
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param array $definition The property definition data as array
      * @param NodeTypeManager $nodeTypeManager
      */
-    public function __construct($factory, array $definition, NodeTypeManager $nodeTypeManager)
+    public function __construct(FactoryInterface $factory, array $definition, NodeTypeManager $nodeTypeManager)
     {
         $this->factory = $factory;
         $this->fromArray($definition);
@@ -89,8 +94,9 @@ class ItemDefinition implements \PHPCR\NodeType\ItemDefinitionInterface
         $this->onParentVersion = $data['onParentVersion'];
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDeclaringNodeType()
@@ -98,8 +104,9 @@ class ItemDefinition implements \PHPCR\NodeType\ItemDefinitionInterface
         return $this->nodeTypeManager->getNodeType($this->declaringNodeType);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getName()
@@ -107,8 +114,9 @@ class ItemDefinition implements \PHPCR\NodeType\ItemDefinitionInterface
         return $this->name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isAutoCreated()
@@ -116,8 +124,9 @@ class ItemDefinition implements \PHPCR\NodeType\ItemDefinitionInterface
         return $this->isAutoCreated;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isMandatory()
@@ -125,8 +134,9 @@ class ItemDefinition implements \PHPCR\NodeType\ItemDefinitionInterface
         return $this->isMandatory;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getOnParentVersion()
@@ -134,8 +144,9 @@ class ItemDefinition implements \PHPCR\NodeType\ItemDefinitionInterface
         return $this->onParentVersion;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isProtected()

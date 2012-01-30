@@ -1,7 +1,14 @@
 <?php
+
 namespace Jackalope\NodeType;
 
 use ArrayIterator;
+use Exception;
+
+use PHPCR\PropertyType;
+use PHPCR\ValueFormatException;
+use PHPCR\NodeType\NodeTypeInterface;
+
 use Jackalope\NotImplementedException;
 
 /**
@@ -14,7 +21,7 @@ use Jackalope\NotImplementedException;
  *
  * @api
  */
-class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInterface
+class NodeType extends NodeTypeDefinition implements NodeTypeInterface
 {
     /**
      * Cache of the declared super NodeType instances so they need to be
@@ -47,8 +54,9 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
      */
     protected $childNodeDefinitions = null;
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getSupertypes()
@@ -63,8 +71,9 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         return $this->superTypes;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     protected function getSupertypeNames()
@@ -78,8 +87,9 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         return $this->superTypeNames;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDeclaredSupertypes()
@@ -93,26 +103,29 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         return $this->declaredSupertypes;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getSubtypes()
     {
-        return new \ArrayIterator($this->nodeTypeManager->getSubtypes($this->name));
+        return new ArrayIterator($this->nodeTypeManager->getSubtypes($this->name));
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDeclaredSubtypes()
     {
-        return new \ArrayIterator($this->nodeTypeManager->getDeclaredSubtypes($this->name));
+        return new ArrayIterator($this->nodeTypeManager->getDeclaredSubtypes($this->name));
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isNodeType($nodeTypeName)
@@ -120,8 +133,9 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         return $this->getName() == $nodeTypeName || in_array($nodeTypeName, $this->getSupertypeNames());
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPropertyDefinitions()
@@ -135,8 +149,9 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         return $this->propertyDefinitions;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getChildNodeDefinitions()
@@ -150,16 +165,17 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         return $this->childNodeDefinitions;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function canSetProperty($propertyName, $value)
     {
         $propDefs = $this->getPropertyDefinitions();
         try {
-            $type = \PHPCR\PropertyType::determineType($value);
-        } catch (\PHPCR\ValueFormatException $e) {
+            $type = PropertyType::determineType($value);
+        } catch (ValueFormatException $e) {
             return false;
         }
 
@@ -169,16 +185,16 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
             if ('*' == $prop->getName()) {
                 $wildcards[] = $prop;
             } elseif ($propertyName == $prop->getName()) {
-                if (\PHPCR\PropertyType::UNDEFINED == $prop->getRequiredType()
+                if (PropertyType::UNDEFINED == $prop->getRequiredType()
                     || $type == $prop->getRequiredType()
                 ) {
                     return true;
                 }
                 // try if we can convert. OPTIMIZE: would be nice to know without actually attempting to convert
                 try {
-                    \PHPCR\PropertyType::convertType($value, $prop->getRequiredType(), $type);
+                    PropertyType::convertType($value, $prop->getRequiredType(), $type);
                     return true;
-                } catch (\PHPCR\ValueFormatException $e) {
+                } catch (ValueFormatException $e) {
                     // fall through and return false
                 }
                 return false; // if there is an explicit match, it has to fit
@@ -186,24 +202,25 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         }
         // now check if any of the wildcards matches
         foreach ($wildcards as $prop) {
-            if (\PHPCR\PropertyType::UNDEFINED == $prop->getRequiredType()
+            if (PropertyType::UNDEFINED == $prop->getRequiredType()
                 || $type == $prop->getRequiredType()
             ) {
                 return true;
             }
             // try if we can convert. OPTIMIZE: would be nice to know without actually attempting to convert
             try {
-                \PHPCR\PropertyType::convertType($value, $prop->getRequiredType(), $type);
+                PropertyType::convertType($value, $prop->getRequiredType(), $type);
                 return true;
-            } catch (\PHPCR\ValueFormatException $e) {
+            } catch (ValueFormatException $e) {
                 return false; // if there is an explicit match, it has to fit
             }
         }
         return false;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function canAddChildNode($childNodeName, $nodeTypeName = null)
@@ -215,7 +232,7 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
                 if ($nodeType->isMixin() || $nodeType->isAbstract()) {
                     return false;
                 }
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 return false;
             }
         }
@@ -237,8 +254,9 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         return false;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function canRemoveNode($nodeName)
@@ -254,8 +272,9 @@ class NodeType extends NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeInt
         return true;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function canRemoveProperty($propertyName)

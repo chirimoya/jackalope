@@ -1,8 +1,12 @@
 <?php
 namespace Jackalope\NodeType;
 
+use DOMElement;
+use DOMXPath;
+
+use PHPCR\NodeType\NodeDefinitionInterface;
+
 use Jackalope\Helper;
-use \DOMElement, \DOMXPath;
 
 /**
  * {@inheritDoc}
@@ -11,7 +15,7 @@ use \DOMElement, \DOMXPath;
  *
  * @api
  */
-class NodeDefinition extends ItemDefinition implements \PHPCR\NodeType\NodeDefinitionInterface
+class NodeDefinition extends ItemDefinition implements NodeDefinitionInterface
 {
     const DEFAULT_PRIMARY_NODE = 'nt:base';
 
@@ -50,8 +54,9 @@ class NodeDefinition extends ItemDefinition implements \PHPCR\NodeType\NodeDefin
                 ? $data['requiredPrimaryTypeNames'] : array(self::DEFAULT_PRIMARY_NODE);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getRequiredPrimaryTypes()
@@ -65,8 +70,9 @@ class NodeDefinition extends ItemDefinition implements \PHPCR\NodeType\NodeDefin
         return $this->requiredPrimaryTypes;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getRequiredPrimaryTypeNames()
@@ -74,8 +80,9 @@ class NodeDefinition extends ItemDefinition implements \PHPCR\NodeType\NodeDefin
         return $this->requiredPrimaryTypeNames;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDefaultPrimaryType()
@@ -86,8 +93,9 @@ class NodeDefinition extends ItemDefinition implements \PHPCR\NodeType\NodeDefin
         return $this->nodeTypeManager->getNodeType($this->defaultPrimaryTypeName);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDefaultPrimaryTypeName()
@@ -95,8 +103,9 @@ class NodeDefinition extends ItemDefinition implements \PHPCR\NodeType\NodeDefin
         return $this->defaultPrimaryTypeName;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function allowsSameNameSiblings()

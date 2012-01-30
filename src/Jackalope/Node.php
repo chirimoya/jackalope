@@ -4,10 +4,12 @@ namespace Jackalope;
 
 use ArrayIterator;
 use IteratorAggregate;
+use Exception;
 use InvalidArgumentException;
 use LogicException;
 
 use PHPCR\PropertyType;
+use PHPCR\PropertyInterface;
 use PHPCR\NodeInterface;
 use PHPCR\NodeType\ConstraintViolationException;
 use PHPCR\RepositoryException;
@@ -42,7 +44,7 @@ class Node extends Item implements IteratorAggregate, NodeInterface
     protected $primaryType;
 
     /**
-     * mapping of property name to \PHPCR\PropertyInterface objects.
+     * mapping of property name to PropertyInterface objects.
      *
      * all properties are instantiated in the constructor
      *
@@ -51,6 +53,15 @@ class Node extends Item implements IteratorAggregate, NodeInterface
      * @var array
      */
     protected $properties = array();
+
+    /**
+     * keep track of properties to be deleted until the save operation was successful.
+     *
+     * this is needed in order to track deletions in case of refresh
+     *
+     * keys are the property names, values the properties (in state deleted)
+     */
+    protected $deletedProperties = array();
 
     /**
      * list of the child node names
@@ -64,22 +75,20 @@ class Node extends Item implements IteratorAggregate, NodeInterface
      * This is only to be called by the Factory::get() method even inside the
      * Jackalope implementation to allow for custom implementations of Nodes.
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param array $rawData in the format as returned from
-     *      \Jackalope\TransportInterface
+     *      \Jackalope\Transport\TransportInterface::getNode
      * @param string $path the absolute path of this node
      * @param Session $session
      * @param ObjectManager $objectManager
      * @param boolean $new set to true if this is a new node being created.
      *      Defaults to false which means the node is loaded from storage.
      *
-     * @see \Jackalope\TransportInterface::getNode()
+     * @see \Jackalope\Transport\TransportInterface::getNode()
      *
      * @private
      */
-    public function __construct(Factory $factory, $rawData, $path, Session $session,
-                                ObjectManager $objectManager, $new = false)
+    public function __construct(Factory $factory, $rawData, $path, Session $session, ObjectManager $objectManager, $new = false)
     {
         parent::__construct($factory, $path, $session, $objectManager, $new);
         $this->isNode = true;
@@ -90,7 +99,7 @@ class Node extends Item implements IteratorAggregate, NodeInterface
     /**
      * Initialize or update this object with raw data from backend.
      *
-     * @param array $rawData in the format as returned from Jackalope\TransportInterface
+     * @param array $rawData in the format as returned from Jackalope\Transport\TransportInterface
      * @param boolean $update whether to initialize this object or update
      * @param boolean $keepChanges only used if $update is true, same as $keepChanges in refresh()
      *
@@ -157,7 +166,7 @@ class Node extends Item implements IteratorAggregate, NodeInterface
                             }
                             if (isset($this->properties[$key])) {
                                 // refresh existing binary, this will only happen in update
-                                // only update length if
+                                // only update length
                                 if (! ($keepChanges && $this->properties[$key]->isModified())) {
                                     $this->properties[$key]->_setLength($value);
                                     if ($this->properties[$key]->isDirty()) {
@@ -178,8 +187,19 @@ class Node extends Item implements IteratorAggregate, NodeInterface
                 if ($update && array_key_exists($key, $this->properties)) {
                     unset($oldProperties[$key]);
                     $prop = $this->properties[$key];
-                    if ($keepChanges && ($prop->isModified())) {
+                    if ($keepChanges && $prop->isModified()) {
                         continue;
+                    }
+                } elseif ($update && array_key_exists($key, $this->deletedProperties)) {
+                    if ($keepChanges) {
+                        // keep the delete
+                        continue;
+                    } else {
+                        // restore the property
+                        $this->properties[$key] = $this->deletedProperties[$key];
+                        $this->properties[$key]->setClean();
+                        // now let the loop update the value. no need to talk to ObjectManager as it
+                        // does not store property deletions
                     }
                 }
 
@@ -374,8 +394,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         //TODO: this is not enough to persist the reordering with the transport
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setProperty($name, $value, $type = PropertyType::UNDEFINED)
@@ -394,8 +415,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $this->_setProperty($name, $value, $type, false);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNode($relPath)
@@ -410,8 +432,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $node;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNodes($filter = null)
@@ -437,8 +460,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return new ArrayIterator($result);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getProperty($relPath)
@@ -456,8 +480,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $this->session->getProperty($this->getChildPath($relPath));
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPropertyValue($name, $type=null)
@@ -471,8 +496,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $val;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getProperties($filter = null)
@@ -488,8 +514,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return new ArrayIterator($result);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPropertiesValues($filter=null, $dereference=true)
@@ -516,8 +543,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $result;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPrimaryItem()
@@ -530,7 +558,7 @@ class Node extends Item implements IteratorAggregate, NodeInterface
             if ($item_name !== null) {
                 $primary_item = $this->session->getItem($this->path . '/' . $item_name);
             }
-        } catch (\Exception $ex) {
+        } catch (Exception $ex) {
             throw new RepositoryException("An error occured while reading the primary item of the node '{$this->path}': " . $ex->getMessage());
         }
 
@@ -541,8 +569,10 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $primary_item;
     }
 
-    // inherit all doc
+
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getIdentifier()
@@ -555,8 +585,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return null;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getIndex()
@@ -566,8 +597,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $this->index;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getReferences($name = null)
@@ -577,8 +609,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $this->objectManager->getReferences($this->path, $name);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getWeakReferences($name = null)
@@ -588,8 +621,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $this->objectManager->getWeakReferences($this->path, $name);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function hasNode($relPath)
@@ -606,8 +640,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $this->session->nodeExists($this->getChildPath($relPath));
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function hasProperty($relPath)
@@ -624,8 +659,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $this->session->propertyExists($this->getChildPath($relPath));
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function hasNodes()
@@ -635,8 +671,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return !empty($this->nodes);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function hasProperties()
@@ -646,8 +683,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return (! empty($this->properties));
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPrimaryNodeType()
@@ -658,8 +696,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $ntm->getNodeType($this->primaryType);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getMixinNodeTypes()
@@ -677,8 +716,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $res;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isNodeType($nodeTypeName)
@@ -729,10 +769,10 @@ class Node extends Item implements IteratorAggregate, NodeInterface
     }
 
     /**
-     * Adds the mixin node type named $mixinName to this node.
+     * {@inheritDoc}
      *
-     * Jackalope only validates type conflicts on save. It is possible to add
-     * mixin types after the first save.
+     * Jackalope validates type conflicts only on save, not immediatly.
+     *It is possible to add mixin types after the first save.
      *
      * @api
      */
@@ -759,8 +799,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         }
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function removeMixin($mixinName)
@@ -774,8 +815,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException('Write');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function canAddMixin($mixinName)
@@ -785,8 +827,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException('Write');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDefinition()
@@ -796,8 +839,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function update($srcWorkspace)
@@ -812,8 +856,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException('Write');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getCorrespondingNodePath($workspaceName)
@@ -823,8 +868,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getSharedSet()
@@ -834,8 +880,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function removeSharedSet()
@@ -846,8 +893,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException('Write');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function removeShare()
@@ -858,8 +906,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException('Write');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isCheckedOut()
@@ -869,8 +918,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isLocked()
@@ -880,8 +930,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function followLifecycleTransition($transition)
@@ -892,8 +943,9 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         throw new NotImplementedException('Write');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAllowedLifecycleTransitions()
@@ -978,8 +1030,13 @@ class Node extends Item implements IteratorAggregate, NodeInterface
     /**
      * Removes the reference in the internal node storage
      *
-     * @throws \PHPCR\ItemNotFoundException If child not found
+     * @param string $name the name of the child node to unset
+     * @param bool $check whether a state check should be done - set to false
+     *      during internal update operations
+     *
      * @return void
+     *
+     * @throws ItemNotFoundException If there is no child with $name
      *
      * @private
      */
@@ -1001,7 +1058,6 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         unset($this->nodes[$key]);
     }
 
-
     /**
      * Adds child node to this node for internal reference
      *
@@ -1021,12 +1077,14 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         $this->nodes[] = $name;
     }
 
-
     /**
      * Removes the reference in the internal node storage
      *
-     * @throws \PHPCR\ItemNotFoundException If property not found
+     * @param string $name the name of the property to unset.
+     *
      * @return void
+     *
+     * @throws ItemNotFoundException If this node has no property with name $name
      *
      * @private
      */
@@ -1038,7 +1096,17 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         if (!array_key_exists($name, $this->properties)) {
             throw new ItemNotFoundException('Implementation Error: Could not remove property from node because it is already gone');
         }
+        $this->deletedProperties[$name] = $this->properties[$name];
         unset($this->properties[$name]);
+    }
+
+    /**
+     * In addition to calling parent method, clean deletedProperties
+     */
+    public function confirmSaved()
+    {
+        $this->deletedProperties = array();
+        parent::confirmSaved();
     }
 
     /**
@@ -1063,9 +1131,12 @@ class Node extends Item implements IteratorAggregate, NodeInterface
         return $path . $p;
     }
 
-    /** filter the list of names according to the filter expression / array
+    /**
+     * Filter the list of names according to the filter expression / array
+     *
      * @param string|array $filter according to getNodes|getProperties
      * @param array $names list of names to filter
+     *
      * @return the names in $names that match a filter
      */
     protected static function filterNames($filter, $names)
@@ -1124,7 +1195,7 @@ class Node extends Item implements IteratorAggregate, NodeInterface
      * @param string $type
      * @param boolean $internal whether we are setting this node through api or internally
      *
-     * @return \Jackalope\Property
+     * @return Property
      *
      * @see Node::setProperty
      * @see Node::refresh

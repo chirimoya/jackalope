@@ -1,8 +1,13 @@
 <?php
+
 namespace Jackalope\NodeType;
 
+use DOMElement;
+use DOMXPath;
+
+use PHPCR\NodeType\PropertyDefinitionInterface;
+
 use Jackalope\Helper;
-use \DOMElement, \DOMXPath;
 
 /**
  * {@inheritDoc}
@@ -11,7 +16,7 @@ use \DOMElement, \DOMXPath;
  *
  * @api
  */
-class PropertyDefinition extends ItemDefinition implements \PHPCR\NodeType\PropertyDefinitionInterface
+class PropertyDefinition extends ItemDefinition implements PropertyDefinitionInterface
 {
     /**
      * One of the PropertyType type constants
@@ -64,8 +69,9 @@ class PropertyDefinition extends ItemDefinition implements \PHPCR\NodeType\Prope
         $this->defaultValues = isset($data['defaultValues']) ? $data['defaultValues'] : array();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getRequiredType()
@@ -73,8 +79,9 @@ class PropertyDefinition extends ItemDefinition implements \PHPCR\NodeType\Prope
         return $this->requiredType;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getValueConstraints()
@@ -82,8 +89,9 @@ class PropertyDefinition extends ItemDefinition implements \PHPCR\NodeType\Prope
         return $this->valueConstraints;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDefaultValues()
@@ -91,8 +99,9 @@ class PropertyDefinition extends ItemDefinition implements \PHPCR\NodeType\Prope
         return $this->defaultValues;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isMultiple()
@@ -100,8 +109,9 @@ class PropertyDefinition extends ItemDefinition implements \PHPCR\NodeType\Prope
         return $this->isMultiple;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAvailableQueryOperators()
@@ -109,8 +119,9 @@ class PropertyDefinition extends ItemDefinition implements \PHPCR\NodeType\Prope
         return $this->availableQueryOperators;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isFullTextSearchable()
@@ -118,8 +129,9 @@ class PropertyDefinition extends ItemDefinition implements \PHPCR\NodeType\Prope
         return $this->isFullTextSearchable;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isQueryOrderable()

@@ -28,7 +28,6 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
                     'WorkspaceManagement',
                     'ShareableNodes',
                     'AccessControlManagement',
-                    'Locking',
                     'LifecycleManagement',
                     'RetentionAndHold',
                     'SameNameSiblings',
@@ -36,8 +35,8 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
         );
 
         $this->unsupportedCases = array(
-                    'Versioning\\DeleteVersionTest',
         );
+
         $this->unsupportedTests = array(
                     'Connecting\\RepositoryTest::testLoginException', //TODO: figure out what would be invalid credentials
                     'Connecting\\RepositoryTest::testNoLogin',
@@ -54,9 +53,11 @@ class ImplementationLoader extends \PHPCR\Test\AbstractLoader
 
                     'Writing\\NamespaceRegistryTest::testRegisterUnregisterNamespace',
                     'Writing\\CopyMethodsTest::testCopyUpdateOnCopy',
+                    'Writing\\MoveMethodsTest::testSessionDeleteMoved', // TODO: enable and look at the exception you get as starting point
                     'Writing\\MoveMethodsTest::testNodeOrderBeforeEnd',
                     'Writing\\MoveMethodsTest::testNodeOrderBeforeDown',
                     'Writing\\MoveMethodsTest::testNodeOrderBeforeUp',
+                    'Writing\\MoveMethodsTest::testNodeOrderBeforeUpAndDelete',
         );
     }
 

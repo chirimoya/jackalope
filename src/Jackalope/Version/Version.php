@@ -2,17 +2,21 @@
 
 namespace Jackalope\Version;
 
+use PHPCR\Version\VersionInterface;
+
 use Jackalope\NotImplementedException;
 use Jackalope\Node;
 
-// inherit all doc
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class Version extends Node implements \PHPCR\Version\VersionInterface {
+class Version extends Node implements VersionInterface {
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getContainingHistory()
@@ -20,17 +24,23 @@ class Version extends Node implements \PHPCR\Version\VersionInterface {
        throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getCreated()
     {
-        throw new NotImplementedException();
+        if (!$this->hasProperty('jcr:created')) {
+            return null;
+        }
+
+        return $this->getProperty('jcr:created')->getValue();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getLinearSuccessor()
@@ -38,8 +48,9 @@ class Version extends Node implements \PHPCR\Version\VersionInterface {
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getSuccessors()
@@ -57,14 +68,15 @@ class Version extends Node implements \PHPCR\Version\VersionInterface {
         $results = array();
         if ($successors) {
             foreach ($successors as $uuid) {
-                $results[] = $this->objectManager->getNode($uuid, '/', 'Version\Version');
+                $results[] = $this->objectManager->getNode($uuid, '/', 'Version\\Version');
             }
         }
         return $results;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getLinearPredecessor()
@@ -72,8 +84,9 @@ class Version extends Node implements \PHPCR\Version\VersionInterface {
         throw new NotImplementedException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPredecessors()
@@ -91,19 +104,29 @@ class Version extends Node implements \PHPCR\Version\VersionInterface {
         $predecessors = $this->getProperty("jcr:predecessors")->getString();
         $results = array();
         foreach ($predecessors as $uuid) {
-            $results[] = $this->objectManager->getNode($uuid, '/', 'Version\Version');
+            $results[] = $this->objectManager->getNode($uuid, '/', 'Version\\Version');
         }
         return $results;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getFrozenNode()
     {
-        $frozen = $this->getNode('jcr:frozenNode');
-        //TODO: what should we do now? recreate the node with the data at that time?
-        throw new NotImplementedException();
+        return $this->getNode('jcr:frozenNode');
+    }
+
+    /**
+     * {@inheritDoc}
+     *
+     * @api
+     */
+    public function remove()
+    {
+        // A version node cannot be removed, so always throw an Exception
+        throw new \PHPCR\RepositoryException('You can not remove a version like this, use VersionHistory.removeVersion()');
     }
 }

@@ -3,13 +3,30 @@
 namespace Jackalope;
 
 use ArrayIterator;
-use PHPCR\PropertyType;
+use Exception;
 
-// inherit all doc
+use PHPCR\PropertyType;
+use PHPCR\RepositoryInterface;
+use PHPCR\SessionInterface;
+use PHPCR\NodeInterface;
+use PHPCR\SimpleCredentials;
+use PHPCR\CredentialsInterface;
+use PHPCR\PathNotFoundException;
+use PHPCR\ItemNotFoundException;
+use PHPCR\ItemExistsException;
+use PHPCR\UnsupportedRepositoryOperationException;
+
+use PHPCR\Security\AccessControlException;
+
+use Jackalope\Transport\TransportInterface;
+use Jackalope\Transport\TransactionInterface;
+
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class Session implements \PHPCR\SessionInterface
+class Session implements SessionInterface
 {
     /**
      * A registry for all created sessions to be able to reference them by id in
@@ -22,7 +39,7 @@ class Session implements \PHPCR\SessionInterface
 
     /**
      * The factory to instantiate objects
-     * @var object
+     * @var FactoryInterface
      */
     protected $factory;
 
@@ -39,7 +56,7 @@ class Session implements \PHPCR\SessionInterface
      */
     protected $objectManager;
     /**
-     * @var \PHPCR\SimpleCredentials
+     * @var SimpleCredentials
      */
     protected $credentials;
     /**
@@ -70,15 +87,14 @@ class Session implements \PHPCR\SessionInterface
      *
      * Builds the corresponding workspace instance
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param Repository $repository
      * @param string $workspaceName the workspace name that is used
-     * @param \PHPCR\SimpleCredentials $credentials the credentials that where
+     * @param SimpleCredentials $credentials the credentials that where
      *      used to log in, in order to implement Session::getUserID()
      * @param TransportInterface $transport the transport implementation
      */
-    public function __construct($factory, Repository $repository, $workspaceName, \PHPCR\SimpleCredentials $credentials, TransportInterface $transport)
+    public function __construct(FactoryInterface $factory, Repository $repository, $workspaceName, SimpleCredentials $credentials, TransportInterface $transport)
     {
         $this->factory = $factory;
         $this->repository = $repository;
@@ -91,8 +107,9 @@ class Session implements \PHPCR\SessionInterface
         $transport->setNodeTypeManager($this->workspace->getNodeTypeManager());
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getRepository()
@@ -100,8 +117,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->repository;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getUserID()
@@ -109,8 +127,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->credentials->getUserID(); //TODO: what if its not simple credentials? what about anonymous login?
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAttributeNames()
@@ -118,8 +137,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->credentials->getAttributeNames();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAttribute($name)
@@ -127,8 +147,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->credentials->getAttribute($name);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getWorkspace()
@@ -136,8 +157,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->workspace;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getRootNode()
@@ -145,19 +167,19 @@ class Session implements \PHPCR\SessionInterface
         return $this->getNode('/');
     }
 
-    // inherit all doc
     /**
      * {@inheritDoc}
      *
-     * TODO: Implement this for jackalope
+     * @api
      */
-    public function impersonate(\PHPCR\CredentialsInterface $credentials)
+    public function impersonate(CredentialsInterface $credentials)
     {
-        throw new \PHPCR\LoginException('Not supported');
+        throw new UnsupportedRepositoryOperationException('Not supported');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNodeByIdentifier($id)
@@ -165,8 +187,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->objectManager->getNode($id);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNodesByIdentifier($ids)
@@ -179,14 +202,15 @@ class Session implements \PHPCR\SessionInterface
         return new ArrayIterator($nodesByUUID);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getItem($absPath)
     {
         if (strpos($absPath,'/') !== 0) {
-            throw new \PHPCR\PathNotFoundException('It is forbidden to call getItem on session with a relative path');
+            throw new PathNotFoundException('It is forbidden to call getItem on session with a relative path');
         }
 
         if ($this->nodeExists($absPath)) {
@@ -195,21 +219,23 @@ class Session implements \PHPCR\SessionInterface
         return $this->getProperty($absPath);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNode($absPath)
     {
         try {
             return $this->objectManager->getNodeByPath($absPath);
-        } catch (\PHPCR\ItemNotFoundException $e) {
-            throw new \PHPCR\PathNotFoundException($e->getMessage(), $e->getCode(), $e);
+        } catch (ItemNotFoundException $e) {
+            throw new PathNotFoundException($e->getMessage(), $e->getCode(), $e);
         }
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNodes($absPaths)
@@ -217,21 +243,23 @@ class Session implements \PHPCR\SessionInterface
         return $this->objectManager->getNodesByPath($absPaths);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getProperty($absPath)
     {
         try {
             return $this->objectManager->getPropertyByPath($absPath);
-        } catch (\PHPCR\ItemNotFoundException $e) {
-            throw new \PHPCR\PathNotFoundException($e->getMessage(), $e->getCode(), $e);
+        } catch (ItemNotFoundException $e) {
+            throw new PathNotFoundException($e->getMessage(), $e->getCode(), $e);
         }
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function itemExists($absPath)
@@ -242,8 +270,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->nodeExists($absPath) || $this->propertyExists($absPath);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function nodeExists($absPath)
@@ -256,14 +285,15 @@ class Session implements \PHPCR\SessionInterface
             //OPTIMIZE: avoid throwing and catching errors would improve performance if many node exists calls are made
             //would need to communicate to the lower layer that we do not want exceptions
             $this->objectManager->getNodeByPath($absPath);
-        } catch(\PHPCR\ItemNotFoundException $e) {
+        } catch(ItemNotFoundException $e) {
             return false;
         }
         return true;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function propertyExists($absPath)
@@ -272,37 +302,39 @@ class Session implements \PHPCR\SessionInterface
             //OPTIMIZE: avoid throwing and catching errors would improve performance if many node exists calls are made
             //would need to communicate to the lower layer that we do not want exceptions
             $this->getProperty($absPath);
-        } catch(\PHPCR\PathNotFoundException $e) {
+        } catch(PathNotFoundException $e) {
             return false;
         }
         return true;
 
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function move($srcAbsPath, $destAbsPath)
     {
         try {
             $parent = $this->objectManager->getNodeByPath(dirname($destAbsPath));
-        } catch(\PHPCR\ItemNotFoundException $e) {
-            throw new \PHPCR\PathNotFoundException("Target path can not be found: $destAbsPath", $e->getCode(), $e);
+        } catch(ItemNotFoundException $e) {
+            throw new PathNotFoundException("Target path can not be found: $destAbsPath", $e->getCode(), $e);
         }
 
         if ($parent->hasNode(basename($destAbsPath))) {
             // TODO same-name siblings
-            throw new \PHPCR\ItemExistsException('Target node already exists at '.$destAbsPath);
+            throw new ItemExistsException('Target node already exists at '.$destAbsPath);
         }
         if ($parent->hasProperty(basename($destAbsPath))) {
-            throw new \PHPCR\ItemExistsException('Target property already exists at '.$destAbsPath);
+            throw new ItemExistsException('Target property already exists at '.$destAbsPath);
         }
         $this->objectManager->moveNode($srcAbsPath, $destAbsPath);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function removeItem($absPath)
@@ -311,9 +343,8 @@ class Session implements \PHPCR\SessionInterface
         $item->remove();
     }
 
-    // inherit all doc
     /**
-     * @inheritDoc
+     * {@inheritDoc}
      *
      * Wraps the save operation into a transaction if transactions are enabled
      * but we are not currently inside a transaction and rolls back on error.
@@ -325,7 +356,7 @@ class Session implements \PHPCR\SessionInterface
      */
     public function save()
     {
-        if ($this->repository->getDescriptor(\PHPCR\RepositoryInterface::OPTION_TRANSACTIONS_SUPPORTED)) {
+        if ($this->getTransport() instanceof TransactionInterface) {
             $utx = $this->workspace->getTransactionManager();
         }
 
@@ -335,7 +366,7 @@ class Session implements \PHPCR\SessionInterface
             try {
                 $this->objectManager->save();
                 $utx->commit();
-            } catch(\Exception $e) {
+            } catch(Exception $e) {
                 // if anything goes wrong, rollback this mess
                 $utx->rollback();
                 // but do not eat the exception
@@ -346,8 +377,9 @@ class Session implements \PHPCR\SessionInterface
         }
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function refresh($keepChanges)
@@ -370,8 +402,9 @@ class Session implements \PHPCR\SessionInterface
         $this->objectManager->clear();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function hasPendingChanges()
@@ -379,8 +412,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->objectManager->hasPendingChanges();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function hasPermission($absPath, $actions)
@@ -397,18 +431,18 @@ class Session implements \PHPCR\SessionInterface
         return true;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function checkPermission($absPath, $actions)
     {
         if (! $this->hasPermission($absPath, $actions)) {
-            throw new \PHPCR\Security\AccessControlException($absPath);
+            throw new AccessControlException($absPath);
         }
     }
 
-    // inherit all doc
     /**
      * {@inheritDoc}
      *
@@ -418,13 +452,14 @@ class Session implements \PHPCR\SessionInterface
      */
     public function hasCapability($methodName, $target, array $arguments)
     {
-        //we never determine wether operation can be performed as it is optional ;-)
+        //we never determine whether operation can be performed as it is optional ;-)
         //TODO: could implement some
         return true;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function importXML($parentAbsPath, $in, $uuidBehavior)
@@ -432,8 +467,9 @@ class Session implements \PHPCR\SessionInterface
         throw new NotImplementedException('Write');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function exportSystemView($absPath, $stream, $skipBinary, $noRecurse)
@@ -462,7 +498,7 @@ class Session implements \PHPCR\SessionInterface
      *
      * @return void
      */
-    private function exportSystemViewRecursive($node, $stream, $skipBinary, $noRecurse, $root=false)
+    private function exportSystemViewRecursive(NodeInterface $node, $stream, $skipBinary, $noRecurse, $root=false)
     {
         fwrite($stream, '<sv:node');
         if ($root) {
@@ -517,8 +553,9 @@ class Session implements \PHPCR\SessionInterface
         fwrite($stream, '</sv:node>');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function exportDocumentView($absPath, $stream, $skipBinary, $noRecurse)
@@ -545,7 +582,7 @@ class Session implements \PHPCR\SessionInterface
      *
      * @return void
      */
-    private function exportDocumentViewRecursive($node, $stream, $skipBinary, $noRecurse, $root=false)
+    private function exportDocumentViewRecursive(NodeInterface $node, $stream, $skipBinary, $noRecurse, $root=false)
     {
         //TODO: encode name according to spec
         $nodename = $this->escapeXmlName($node->getName());
@@ -611,8 +648,9 @@ class Session implements \PHPCR\SessionInterface
         }
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setNamespacePrefix($prefix, $uri)
@@ -622,8 +660,9 @@ class Session implements \PHPCR\SessionInterface
         //this will lead to rewrite all names and paths in requests and replies. part of this can be done in ObjectManager::normalizePath
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNamespacePrefixes()
@@ -632,8 +671,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->namespaceRegistry->getPrefixes();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNamespaceURI($prefix)
@@ -642,8 +682,9 @@ class Session implements \PHPCR\SessionInterface
         return $this->namespaceRegistry->getURI($prefix);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNamespacePrefix($uri)
@@ -652,20 +693,25 @@ class Session implements \PHPCR\SessionInterface
         return $this->namespaceRegistry->getPrefix($uri);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function logout()
     {
         //OPTIMIZATION: flush object manager to help garbage collector
         $this->logout = true;
+        if ($this->getRepository()->getDescriptor(RepositoryInterface::OPTION_LOCKING_SUPPORTED)) {
+            $this->getWorkspace()->getLockManager()->logout();
+        }
         self::unregisterSession($this);
         $this->getTransport()->logout();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isLive()
@@ -673,22 +719,24 @@ class Session implements \PHPCR\SessionInterface
         return ! $this->logout;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAccessControlManager()
     {
-        throw new \PHPCR\UnsupportedRepositoryOperationException();
+        throw new UnsupportedRepositoryOperationException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getRetentionManager()
     {
-        throw new \PHPCR\UnsupportedRepositoryOperationException();
+        throw new UnsupportedRepositoryOperationException();
     }
 
     /**
@@ -722,6 +770,8 @@ class Session implements \PHPCR\SessionInterface
      * Implementation specific: register session in session registry for the
      * stream wrapper.
      *
+     * @param Session $session the session to register
+     *
      * @private
      */
     protected static function registerSession(Session $session)
@@ -733,6 +783,8 @@ class Session implements \PHPCR\SessionInterface
     /**
      * Implementation specific: unregister session in session registry on
      * logout.
+     *
+     * @param Session $session the session to unregister
      *
      * @private
      */
@@ -748,7 +800,7 @@ class Session implements \PHPCR\SessionInterface
      *
      * @private
      *
-     * @return an id for this session
+     * @return string an id for this session
      */
     public function getRegistryKey()
     {
@@ -759,7 +811,7 @@ class Session implements \PHPCR\SessionInterface
      * Implementation specific: get a session from the session registry for the
      * stream wrapper.
      *
-     * @param $key key for the session
+     * @param string $key key for the session
      *
      * @return the session or null if none is registered with the given key
      *

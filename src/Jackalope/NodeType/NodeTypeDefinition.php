@@ -1,20 +1,28 @@
 <?php
 namespace Jackalope\NodeType;
 
-use Jackalope\Helper;
-use \DOMElement, \DOMXPath, \ArrayObject;
+use DOMElement;
+use DOMXPath;
+use ArrayObject;
+use InvalidArgumentException;
 
-// inherit all doc
+use PHPCR\NodeType\NodeTypeDefinitionInterface;
+
+use Jackalope\Helper;
+use Jackalope\FactoryInterface;
+
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
+class NodeTypeDefinition implements NodeTypeDefinitionInterface
 {
     const NAME_NT_BASE = 'nt:base';
 
     /**
      * The factory to instantiate objects
-     * @var Factory
+     * @var FactoryInterface
      */
     protected $factory;
 
@@ -63,16 +71,16 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
      * Optionally initializes the data from XML, an array or another
      * NodeTypeDefinition.
      *
-     * @param object $factory  an object factory implementing "get" as
-     *      described in \Jackalope\Factory
-     * @param DOMElement|PHPCR\NodeType\NodeTypeDefinitionInterface|null
+     * @param FactoryInterface $factory the object factory
+     * @param NodeTypeManager $nodeTypeManager
+     * @param DOMElement|NodeTypeDefinitionInterface|null
      *      $nodetype Either by XML or by NodeTypeDefinition or null for an
      *      empty definition
      *
-     * @throws \InvalidArgumentException If it is not possible to read data
+     * @throws InvalidArgumentException If it is not possible to read data
      *      from $nodetype
      */
-    public function __construct($factory, NodeTypeManager $nodeTypeManager, $nodetype = null)
+    public function __construct(FactoryInterface $factory, NodeTypeManager $nodeTypeManager, $nodetype = null)
     {
         $this->factory = $factory;
         $this->nodeTypeManager = $nodeTypeManager;
@@ -81,20 +89,20 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
             $this->fromXml($nodetype);
         } elseif (is_array($nodetype)) {
             $this->fromArray($nodetype);
-        } elseif ($nodetype instanceof \PHPCR\NodeType\NodeTypeDefinitionInterface) {
+        } elseif ($nodetype instanceof NodeTypeDefinitionInterface) {
             $this->fromNodeTypeDefinition($nodetype); // copy constructor
         } elseif (!is_null($nodetype)) {
-            throw new \InvalidArgumentException('Implementation Error -- unknown nodetype class: '.get_class($nodetype));
+            throw new InvalidArgumentException('Implementation Error -- unknown nodetype class: '.get_class($nodetype));
         }
     }
 
     /**
      * Read the node type definition from another NodeTypeDefinition
      *
-     * @param \PHPCR\NodeType\NodeTypeDefinitionInterface $ntd The node type
+     * @param NodeTypeDefinitionInterface $ntd The node type
      *      definition to copy information from
      */
-    protected function fromNodeTypeDefinition(\PHPCR\NodeType\NodeTypeDefinitionInterface $ntd)
+    protected function fromNodeTypeDefinition(NodeTypeDefinitionInterface $ntd)
     {
         $this->name = $ntd->getName();
         $this->isAbstract = $ntd->isAbstract();
@@ -124,14 +132,14 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         $this->declaredPropertyDefinitions = new ArrayObject();
         foreach ($data['declaredPropertyDefinitions'] as $propertyDef) {
             $this->declaredPropertyDefinitions[] = $this->factory->get(
-                'NodeType\PropertyDefinition',
+                'NodeType\\PropertyDefinition',
                 array($propertyDef, $this->nodeTypeManager)
             );
         }
         $this->declaredNodeDefinitions = new ArrayObject();
         foreach ($data['declaredNodeDefinitions'] as $nodeDef) {
             $this->declaredNodeDefinitions[] = $this->factory->get(
-                'NodeType\NodeDefinition',
+                'NodeType\\NodeDefinition',
                 array($nodeDef, $this->nodeTypeManager)
             );
         }
@@ -140,7 +148,7 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
     /**
      * Reads the node type definition from an xml element
      *
-     * @param \DOMElement $node The dom element to read information from
+     * @param DOMElement $node The dom element to read information from
      */
     protected function fromXml(DOMElement $node)
     {
@@ -166,7 +174,7 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         $properties = $xp->query('propertyDefinition', $node);
         foreach ($properties as $property) {
             $this->declaredPropertyDefinitions[] = $this->factory->get(
-                'NodeType\PropertyDefinition',
+                'NodeType\\PropertyDefinition',
                 array($property, $this->nodeTypeManager)
             );
         }
@@ -175,14 +183,15 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         $declaredNodeDefinitions = $xp->query('childNodeDefinition', $node);
         foreach ($declaredNodeDefinitions as $nodeDefinition) {
             $this->declaredNodeDefinitions[] = $this->factory->get(
-                'NodeType\NodeDefinition',
+                'NodeType\\NodeDefinition',
                 array($nodeDefinition, $this->nodeTypeManager)
             );
         }
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getName()
@@ -190,8 +199,9 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         return $this->name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDeclaredSupertypeNames()
@@ -202,8 +212,9 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         return $this->declaredSuperTypeNames;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isAbstract()
@@ -211,8 +222,9 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         return $this->isAbstract;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isMixin()
@@ -220,8 +232,9 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         return $this->isMixin;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function hasOrderableChildNodes()
@@ -229,8 +242,9 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         return $this->hasOrderableChildNodes;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isQueryable()
@@ -238,8 +252,9 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         return $this->isQueryable;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPrimaryItemName()
@@ -247,22 +262,26 @@ class NodeTypeDefinition implements \PHPCR\NodeType\NodeTypeDefinitionInterface
         return $this->primaryItemName;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDeclaredPropertyDefinitions()
     {
-        return is_null($this->declaredPropertyDefinitions) ? null : $this->declaredPropertyDefinitions->getArrayCopy();
+        return is_null($this->declaredPropertyDefinitions)
+            ? null : $this->declaredPropertyDefinitions->getArrayCopy();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDeclaredChildNodeDefinitions()
     {
-        return is_null($this->declaredNodeDefinitions) ? null : $this->declaredNodeDefinitions->getArrayCopy();
+        return is_null($this->declaredNodeDefinitions)
+            ? null : $this->declaredNodeDefinitions->getArrayCopy();
     }
 
 }

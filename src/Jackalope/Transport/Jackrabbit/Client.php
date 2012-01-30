@@ -1,24 +1,71 @@
 <?php
+
 namespace Jackalope\Transport\Jackrabbit;
 
-use PHPCR\PropertyType;
-use Jackalope\Transport\curl;
-use Jackalope\TransactionalTransportInterface;
-use Jackalope\NotImplementedException;
 use DOMDocument;
+use LogicException;
+use InvalidArgumentException;
+
+use PHPCR\CredentialsInterface;
+use PHPCR\SimpleCredentials;
+use PHPCR\PropertyType;
+use PHPCR\PropertyInterface;
+use PHPCR\NodeInterface;
+use PHPCR\SessionInterface;
+use PHPCR\RepositoryException;
+use PHPCR\UnsupportedRepositoryOperationException;
+use PHPCR\ItemExistsException;
+use PHPCR\ItemNotFoundException;
+use PHPCR\PathNotFoundException;
+use PHPCR\LoginException;
+use PHPCR\Query\QueryInterface;
+use PHPCR\Query\QOM\QueryObjectModelInterface;
+
+use Jackalope\Transport\BaseTransport;
+use Jackalope\Transport\curl;
+use Jackalope\Transport\QueryInterface as QueryTransport;
+use Jackalope\Transport\PermissionInterface;
+use Jackalope\Transport\WritingInterface;
+use Jackalope\Transport\VersioningInterface;
+use Jackalope\Transport\NodeTypeCndManagementInterface;
+use Jackalope\Transport\TransactionInterface;
+use Jackalope\Transport\LockingInterface;
+use Jackalope\NotImplementedException;
+use Jackalope\Query\SqlQuery;
 use Jackalope\NodeType\NodeTypeManager;
+use Jackalope\Lock\Lock;
+use Jackalope\FactoryInterface;
+
 
 /**
  * Connection to one Jackrabbit server.
  *
  * This class handles the communication between Jackalope and Jackrabbit over
- * Davex. Once the login method has been called, the workspace is set and can not be
- * changed anymore.
+ * Davex. Once the login method has been called, the workspace is set and can
+ * not be changed anymore.
+ *
+ * We make one exception to the rule that nothing may be cached in the
+ * transport: Repository descriptors are considered immutable and cached
+ * (because they are also used in startup to check the backend version is
+ * compatible).
  *
  * @license http://www.apache.org/licenses/LICENSE-2.0  Apache License Version 2.0, January 2004
+ *
+ * @author Christian Stocker <chregu@liip.ch>
+ * @author David Buchmann <david@liip.ch>
+ * @author Tobias Ebnöther <ebi@liip.ch>
+ * @author Roland Schilter <roland.schilter@liip.ch>
+ * @author Uwe Jäger <uwej711@googlemail.com>
+ * @author Lukas Kahwe Smith <smith@pooteeweet.org>
+ * @author Daniel Barsotti <daniel.barsotti@liip.ch>
  */
-class Client implements TransactionalTransportInterface
+class Client extends BaseTransport implements QueryTransport, PermissionInterface, WritingInterface, VersioningInterface, NodeTypeCndManagementInterface, TransactionInterface, LockingInterface
 {
+    /**
+     * minimal version needed for the backend server
+     */
+    const VERSION = "2.3.6";
+
     /**
      * Description of the namspace to be used for communication with the server.
      * @var string
@@ -32,18 +79,13 @@ class Client implements TransactionalTransportInterface
     const NS_DAV = 'DAV:';
 
     /**
-     * Representation of a XML string header.
-     *
-     * @todo TODO: seems not to be used anymore.
-     *
-     * @var string
+     * Jackrabbit 2.3.6 returns this weird number to say its an infinite lock
      */
-    const REGISTERED_NAMESPACES =
-        '<?xml version="1.0" encoding="UTF-8"?>< xmlns:dcr="http://www.day.com/jcr/webdav/1.0"/>';
+    const JCR_INFINITE_LOCK_TIMEOUT = 2147483;
 
     /**
      * The factory to instantiate objects
-     * @var Factory
+     * @var FactoryInterface
      */
     protected $factory;
 
@@ -59,6 +101,9 @@ class Client implements TransactionalTransportInterface
 
     /**
      * Workspace name the transport is bound to
+     *
+     * Set once login() has been executed and may not be changed later on.
+     *
      * @var string
      */
     protected $workspace;
@@ -77,16 +122,19 @@ class Client implements TransactionalTransportInterface
      *
      * "$server/$workspace/jcr%3aroot
      * (make sure you never hardcode the jcr%3aroot, its ugly)
-     * @todo TODO: apparently, jackrabbit handles the root node by name - it is invisible everywhere for the api,
-     *             but needed when talking to the backend... could that name change?
+     * @todo apparently, jackrabbit handles the root node by name - it is invisible everywhere for the api,
+     *       but needed when talking to the backend... could that name change?
      *
      * @var string
      */
     protected $workspaceUriRoot;
 
     /**
-     * Set of credentials necessary to connect to the server or else.
-     * @var \PHPCR\CredentialsInterface
+     * Set of credentials necessary to connect to the server.
+     *
+     * Set once login() has been executed and may not be changed later on.
+     *
+     * @var CredentialsInterface
      */
     protected $credentials;
 
@@ -128,6 +176,15 @@ class Client implements TransactionalTransportInterface
     protected $checkLoginOnServer = true;
 
     /**
+     * Cached result of the repository descriptors.
+     *
+     * This is our exception to the rule that nothing may be cached in transport.
+     *
+     * @var array of strings as returned by getRepositoryDescriptors
+     */
+    protected $descriptors = null;
+
+    /**
       * The transaction token received by a LOCKing request
       *
       * Is FALSE while no transaction running.
@@ -138,10 +195,10 @@ class Client implements TransactionalTransportInterface
     /**
      * Create a transport pointing to a server url.
      *
-     * @param object $factory  an object factory implementing "get" as described in \Jackalope\Factory.
-     * @param serverUri location of the server
+     * @param FactoryInterface $factory the object factory
+     * @param string serverUri location of the server
      */
-    public function __construct($factory, $serverUri)
+    public function __construct(FactoryInterface $factory, $serverUri)
     {
         $this->factory = $factory;
         // append a slash if not there
@@ -162,9 +219,15 @@ class Client implements TransactionalTransportInterface
     }
 
     /**
-     * Add a HTTP header which is sent on each Request
+     * Add a HTTP header which is sent on each Request.
      *
-     * This is a Jackrabbit Davex specific option.
+     * This is used for example for a session identifier header to help a proxy
+     * to route all requests from the same session to the same server.
+     *
+     * This is a Jackrabbit Davex specific option called from the repository
+     * factory.
+     *
+     * @param string $header a valid HTTP header to add to each request
      */
     public function addDefaultHeader($header)
     {
@@ -175,11 +238,9 @@ class Client implements TransactionalTransportInterface
      * If you want to send the "Expect: 100-continue" header on larger
      * PUT and POST requests, set this to true.
      *
-     * Disabled by default.
-     *
      * This is a Jackrabbit Davex specific option.
      *
-     * @param bool $send
+     * @param bool $send Whether to send the header or not
      */
     public function sendExpect($send = true)
     {
@@ -189,7 +250,7 @@ class Client implements TransactionalTransportInterface
     /**
      * Makes sure there is an open curl connection.
      *
-     * @return Jackalope\Transport\Jackrabbit\Request The Request
+     * @return Request The Request
      */
     protected function getRequest($method, $uri)
     {
@@ -202,7 +263,7 @@ class Client implements TransactionalTransportInterface
             $this->curl = new curl();
         } elseif ($this->curl === false) {
             // but do not re-connect, rather report the error if trying to access a closed connection
-            throw new \LogicException("Tried to start a request on a closed transport ($method for ".var_export($uri,true).")");
+            throw new LogicException("Tried to start a request on a closed transport ($method for ".var_export($uri,true).")");
         }
 
         foreach ($uri as $key => $row) {
@@ -210,7 +271,7 @@ class Client implements TransactionalTransportInterface
         }
 
 
-        $request = $this->factory->get('Transport\Jackrabbit\Request', array($this->curl, $method, $uri));
+        $request = $this->factory->get('Transport\\Jackrabbit\\Request', array($this, $this->curl, $method, $uri));
         $request->setCredentials($this->credentials);
         foreach ($this->defaultHeaders as $header) {
             $request->addHeader($header);
@@ -223,17 +284,21 @@ class Client implements TransactionalTransportInterface
         return $request;
     }
 
-    // inherit all doc
-    public function login(\PHPCR\CredentialsInterface $credentials, $workspaceName)
+    // CoreInterface //
+
+    /**
+     * {@inheritDoc}
+     */
+    public function login(CredentialsInterface $credentials, $workspaceName)
     {
         if ($this->credentials) {
-            throw new \PHPCR\RepositoryException(
+            throw new RepositoryException(
                 'Do not call login twice. Rather instantiate a new Transport object '.
                 'to log in as different user or for a different workspace.'
             );
         }
-        if (!$credentials instanceof \PHPCR\SimpleCredentials) {
-            throw new \PHPCR\LoginException('Unkown Credentials Type: '.get_class($credentials));
+        if (!$credentials instanceof SimpleCredentials) {
+            throw new LoginException('Unkown Credentials Type: '.get_class($credentials));
         }
 
         $this->credentials = $credentials;
@@ -251,16 +316,18 @@ class Client implements TransactionalTransportInterface
 
         $set = $dom->getElementsByTagNameNS(self::NS_DCR, 'workspaceName');
         if ($set->length != 1) {
-            throw new \PHPCR\RepositoryException('Unexpected answer from server: '.$dom->saveXML());
+            throw new RepositoryException('Unexpected answer from server: '.$dom->saveXML());
         }
 
         if ($set->item(0)->textContent != $this->workspace) {
-            throw new \PHPCR\RepositoryException('Wrong workspace in answer from server: '.$dom->saveXML());
+            throw new RepositoryException('Wrong workspace in answer from server: '.$dom->saveXML());
         }
         return true;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function logout()
     {
         if (!empty($this->curl)) {
@@ -269,50 +336,65 @@ class Client implements TransactionalTransportInterface
         $this->curl = false;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function setCheckLoginOnServer($bool)
     {
         $this->checkLoginOnServer = $bool;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getRepositoryDescriptors()
     {
-        $request = $this->getRequest(Request::REPORT, $this->server);
-        $request->setBody($this->buildReportRequest('dcr:repositorydescriptors'));
-        $dom = $request->executeDom();
+        if (null == $this->descriptors) {
+            $request = $this->getRequest(Request::REPORT, $this->server);
+            $request->setBody($this->buildReportRequest('dcr:repositorydescriptors'));
+            $dom = $request->executeDom();
 
-        if ($dom->firstChild->localName != 'repositorydescriptors-report'
-            || $dom->firstChild->namespaceURI != self::NS_DCR
-        ) {
-            throw new \PHPCR\RepositoryException('Error talking to the backend. '.$dom->saveXML());
-        }
+            if ($dom->firstChild->localName != 'repositorydescriptors-report'
+                || $dom->firstChild->namespaceURI != self::NS_DCR
+            ) {
+                throw new RepositoryException('Error talking to the backend. '.$dom->saveXML());
+            }
 
-        $descs = $dom->getElementsByTagNameNS(self::NS_DCR, 'descriptor');
-        $descriptors = array();
-        foreach ($descs as $desc) {
-            $values = array();
-            foreach ($desc->getElementsByTagNameNS(self::NS_DCR, 'descriptorvalue') as $value) {
-                $values[] = $value->textContent;
+            $descs = $dom->getElementsByTagNameNS(self::NS_DCR, 'descriptor');
+            $this->descriptors = array();
+            foreach ($descs as $desc) {
+                $name = $desc->getElementsByTagNameNS(self::NS_DCR, 'descriptorkey')->item(0)->textContent;
+
+                $values = array();
+                $valuenodes = $desc->getElementsByTagNameNS(self::NS_DCR, 'descriptorvalue');
+                foreach ($valuenodes as $value) {
+                    $values[] = $value->textContent;
+                }
+                if ($valuenodes->length == 1) {
+                    //there was one type and one value => this is a single value property
+                    //TODO: is this the correct assumption? or should the backend tell us specifically?
+                    $this->descriptors[$name] = $values[0];
+                } else {
+                    $this->descriptors[$name] = $values;
+                }
             }
-            if ($desc->childNodes->length == 2) {
-                //there was one type and one value => this is a single value property
-                //TODO: is this the correct assumption? or should the backend tell us specifically?
-                $descriptors[$desc->firstChild->textContent] = $values[0];
-            } else {
-                $descriptors[$desc->firstChild->textContent] = $values;
+
+            if (! isset($this->descriptors['jcr.repository.version'])) {
+                throw new UnsupportedRepositoryOperationException("The backend at {$this->server} does not provide the jcr.repository.version descriptor");
+            }
+
+            if (! version_compare(self::VERSION, $this->descriptors['jcr.repository.version'], '<=')) {
+                throw new UnsupportedRepositoryOperationException("The backend at {$this->server} is an unsupported version of jackrabbit: \"".
+                    $this->descriptors['jcr.repository.version'].
+                    '". Need at least "'.self::VERSION.'"');
             }
         }
-        return $descriptors;
+        return $this->descriptors;
     }
 
-    // inherit all doc
-    public function createWorkspace($name, $srcWorkspace = null)
-    {
-        throw new \Jackalope\NotImplementedException();
-    }
-
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getAccessibleWorkspaceNames()
     {
         $request = $this->getRequest(Request::PROPFIND, $this->server);
@@ -329,41 +411,45 @@ class Client implements TransactionalTransportInterface
         return array_unique($workspaces);
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getNode($path)
     {
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
         $path .= '.0.json';
 
         $request = $this->getRequest(Request::GET, $path);
         $request->setTransactionId($this->transactionToken);
         try {
             return $request->executeJson();
-        } catch (\PHPCR\PathNotFoundException $e) {
-            throw new \PHPCR\ItemNotFoundException($e->getMessage(), $e->getCode(), $e);
+        } catch (PathNotFoundException $e) {
+            throw new ItemNotFoundException($e->getMessage(), $e->getCode(), $e);
         }
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getNodes($paths)
     {
         if (count($paths) == 0) {
             return array();
         }
-        $url = array_shift($paths);
 
-        if (count($paths) == 0) {
+        if (count($paths) == 1) {
+            $url = array_shift($paths);
             try {
                 return array($url => $this->getNode($url));
-            } catch (\PHPCR\ItemNotFoundException $e) {
+            } catch (ItemNotFoundException $e) {
                 return array();
             }
         }
         $body = array();
 
-        $url = $this->encodePathForDavex($url).".0.json";
+        $url = $this->encodeAndValidatePathForDavex("/").".0.json";
         foreach ($paths as $path) {
-            $body[] = http_build_query(array(":get"=>$path));
+            $body[] = http_build_query(array(":include"=>$path));
         }
         $body = implode("&",$body);
         $request = $this->getRequest(Request::POST, $url);
@@ -373,17 +459,19 @@ class Client implements TransactionalTransportInterface
         try {
             $data = $request->executeJson();
             return $data->nodes;
-        } catch (\PHPCR\PathNotFoundException $e) {
-            throw new \PHPCR\ItemNotFoundException($e->getMessage(), $e->getCode(), $e);
-        } catch (\PHPCR\RepositoryException $e) {
+        } catch (PathNotFoundException $e) {
+            throw new ItemNotFoundException($e->getMessage(), $e->getCode(), $e);
+        } catch (RepositoryException $e) {
             if ($e->getMessage() == 'HTTP 403: Prefix must not be empty (org.apache.jackrabbit.spi.commons.conversion.IllegalNameException)') {
-                throw new \PHPCR\UnsupportedRepositoryOperationException("Jackalope currently needs a patched jackrabbit for Session->getNodes() to work. Until our patches make it into the official distribution, see https://github.com/jackalope/jackrabbit/blob/2.2-jackalope/README.jackalope.patches.md for details and downloads.");
+                throw new UnsupportedRepositoryOperationException("Jackalope currently needs a patched jackrabbit for Session->getNodes() to work. Until our patches make it into the official distribution, see https://github.com/jackalope/jackrabbit/blob/2.2-jackalope/README.jackalope.patches.md for details and downloads.");
             }
             throw $e;
         }
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getProperty($path)
     {
         throw new NotImplementedException();
@@ -395,10 +483,12 @@ class Client implements TransactionalTransportInterface
          */
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getBinaryStream($path)
     {
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
         $request = $this->getRequest(Request::GET, $path);
         $request->setTransactionId($this->transactionToken);
         $curl = $request->execute(true);
@@ -413,7 +503,7 @@ class Client implements TransactionalTransportInterface
                 return $stream;
         }
 
-        throw new \PHPCR\RepositoryException('Unknown encoding of binary data: '.$curl->getHeader('Content-Type'));
+        throw new RepositoryException('Unknown encoding of binary data: '.$curl->getHeader('Content-Type'));
     }
 
     /**
@@ -428,19 +518,19 @@ class Client implements TransactionalTransportInterface
      *
      * @return array of stream resources
      *
-     * @throws \PHPCR\RepositoryException if the xml is invalid or any value is not of type binary
+     * @throws RepositoryException if the xml is invalid or any value is not of type binary
      */
     private function decodeBinaryDom($xml)
     {
-        $dom = new \DOMDocument();
+        $dom = new DOMDocument();
         if (! $dom->loadXML($xml)) {
-            throw new \PHPCR\RepositoryException("Failed to load xml data:\n\n$xml");
+            throw new RepositoryException("Failed to load xml data:\n\n$xml");
         }
         $ret = array();
         foreach ($dom->getElementsByTagNameNS(self::NS_DCR, 'values') as $node) {
             foreach ($node->getElementsByTagNameNS(self::NS_DCR, 'value') as $value) {
-                if ($value->getAttributeNS(self::NS_DCR, 'type') != \PHPCR\PropertyType::TYPENAME_BINARY) {
-                    throw new \PHPCR\RepositoryException('Expected binary value but got '.$value->getAttributeNS(self::NS_DCR, 'type'));
+                if ($value->getAttributeNS(self::NS_DCR, 'type') != PropertyType::TYPENAME_BINARY) {
+                    throw new RepositoryException('Expected binary value but got '.$value->getAttributeNS(self::NS_DCR, 'type'));
                 }
                 // TODO: OPTIMIZE stream handling!
                 $stream = fopen('php://memory', 'rwb+');
@@ -452,22 +542,32 @@ class Client implements TransactionalTransportInterface
         return $ret;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getReferences($path, $name = null)
     {
         return $this->getNodeReferences($path, $name);
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getWeakReferences($path, $name = null)
     {
         return $this->getNodeReferences($path, $name, true);
     }
 
-    // inherit all doc
+    /**
+     * @param string $path the path for which we need the references
+     * @param string $name the name of the referencing properties or null for all
+     * @param bool $weak_reference whether to get weak or strong references
+     *
+     * @return array list of paths to nodes that reference $path
+     */
     protected function getNodeReferences($path, $name = null, $weak_reference = false)
     {
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
         $identifier = $weak_reference ? 'weakreferences' : 'references';
         $request = $this->getRequest(Request::PROPFIND, $path);
         $request->setTransactionId($this->transactionToken);
@@ -489,10 +589,14 @@ class Client implements TransactionalTransportInterface
         return $references;
     }
 
-    // inherit all doc
+    // VersioningInterface //
+
+    /**
+     * {@inheritDoc}
+     */
     public function checkinItem($path)
     {
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
         try {
             $request = $this->getRequest(Request::CHECKIN, $path);
             $request->setTransactionId($this->transactionToken);
@@ -502,19 +606,20 @@ class Client implements TransactionalTransportInterface
             }
         } catch (HTTPErrorException $e) {
             if ($e->getCode() == 405) {
-                throw new \PHPCR\UnsupportedRepositoryOperationException();
+                throw new UnsupportedRepositoryOperationException();
             }
-            throw new \PHPCR\RepositoryException($e->getMessage());
+            throw new RepositoryException($e->getMessage());
         }
 
-        // TODO: not sure what this means
-        throw new \PHPCR\RepositoryException();
+        throw new RepositoryException();
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function checkoutItem($path)
     {
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
         try {
             $request = $this->getRequest(Request::CHECKOUT, $path);
             $request->setTransactionId($this->transactionToken);
@@ -522,17 +627,19 @@ class Client implements TransactionalTransportInterface
         } catch (HTTPErrorException $e) {
             if ($e->getCode() == 405) {
                 // TODO: when checking out a non-versionable node, we get here too. in that case the exception is very wrong
-                throw new \PHPCR\UnsupportedRepositoryOperationException($e->getMessage());
+                throw new UnsupportedRepositoryOperationException($e->getMessage());
             }
-            throw new \PHPCR\RepositoryException($e->getMessage());
+            throw new RepositoryException($e->getMessage());
         }
         return;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function restoreItem($removeExisting, $versionPath, $path)
     {
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
 
         $body ='<D:update xmlns:D="DAV:">
 	<D:version>
@@ -549,26 +656,47 @@ class Client implements TransactionalTransportInterface
         $request->execute(); // errors are checked in request
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getVersionHistory($path)
     {
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
         $request = $this->getRequest(Request::GET, $path."/jcr:versionHistory");
+        $request->setTransactionId($this->transactionToken);
+        try {
+            $resp = $request->execute();
+        } catch (PathNotFoundException $e) {
+            // does the node even exist? check only now to not generate unnecessary overhead
+            $this->getNode($path); // throws PathNotFoundException if not existing
+            // if we get here, the node exists, so it is not versionable
+            throw new UnsupportedRepositoryOperationException("Node at $path is not versionable", 0, $e);
+        }
+        return $resp;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function removeVersion($versionPath, $versionName)
+    {
+        $path = $this->encodeAndValidatePathForDavex($versionPath . '/' . $versionName);
+        $request = $this->getRequest(Request::DELETE, $path);
         $request->setTransactionId($this->transactionToken);
         $resp = $request->execute();
         return $resp;
     }
 
-    // inherit all doc
-    public function query(\PHPCR\Query\QueryInterface $query)
+
+    // QueryInterface //
+
+    /**
+     * {@inheritDoc}
+     */
+    public function query(QueryInterface $query)
     {
-        if ($query instanceof \Jackalope\Query\SqlQuery
-            || $query instanceof \PHPCR\Query\QOM\QueryObjectModelInterface
-        ) {
-            $querystring = $query->getStatementSql2();
-        } else {
-            throw new \PHPCR\UnsupportedRepositoryOperationException('Unknown query type: '.$query->getLanguage());
-        }
+        // TODO handle bind variables
+        $querystring = $query->getStatement();
         $limit = $query->getLimit();
         $offset = $query->getOffset();
 
@@ -594,7 +722,7 @@ class Client implements TransactionalTransportInterface
 
         $rawData = $request->execute();
 
-        $dom = new \DOMDocument();
+        $dom = new DOMDocument();
         $dom->loadXML($rawData);
 
         $rows = array();
@@ -606,16 +734,10 @@ class Client implements TransactionalTransportInterface
                     $sets[$childNode->tagName] = $childNode->nodeValue;
                 }
 
-                // TODO this can happen inside joins
-                // probabably caused by https://issues.apache.org/jira/browse/JCR-3089
-                if (!isset($sets['dcr:value'])) {
-                    continue;
-                }
-
                 // TODO if this bug is fixed, spaces may be urlencoded instead of the escape sequence: https://issues.apache.org/jira/browse/JCR-2997
                 // the following line fails for nodes with "_x0020 " in their name, changing that part to " x0020_"
                 // other characters like < and > are urlencoded, which seems to be handled by dom already.
-                $sets['dcr:value'] = str_replace('_x0020_', ' ', $sets['dcr:value']);
+                $sets['dcr:value'] = isset($sets['dcr:value']) ? str_replace('_x0020_', ' ', $sets['dcr:value']) : null;
 
                 $columns[] = $sets;
             }
@@ -626,10 +748,14 @@ class Client implements TransactionalTransportInterface
         return $rows;
     }
 
-    // inherit all doc
+    // WritingInterface //
+
+    /**
+     * {@inheritDoc}
+     */
     public function deleteNode($path)
     {
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
 
         $request = $this->getRequest(Request::DELETE, $path);
         $request->setTransactionId($this->transactionToken);
@@ -637,17 +763,21 @@ class Client implements TransactionalTransportInterface
         return true;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function deleteProperty($path)
     {
         return $this->deleteNode($path);
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function copyNode($srcAbsPath, $dstAbsPath, $srcWorkspace = null)
     {
-        $srcAbsPath = $this->encodePathForDavex($srcAbsPath);
-        $dstAbsPath = $this->encodePathForDavex($dstAbsPath);
+        $srcAbsPath = $this->encodeAndValidatePathForDavex($srcAbsPath);
+        $dstAbsPath = $this->encodeAndValidatePathForDavex($dstAbsPath);
 
         if ($srcWorkspace) {
             $srcAbsPath = $this->server . $srcAbsPath;
@@ -660,11 +790,13 @@ class Client implements TransactionalTransportInterface
         $request->execute();
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function moveNode($srcAbsPath, $dstAbsPath)
     {
-        $srcAbsPath = $this->encodePathForDavex($srcAbsPath);
-        $dstAbsPath = $this->encodePathForDavex($dstAbsPath);
+        $srcAbsPath = $this->encodeAndValidatePathForDavex($srcAbsPath);
+        $dstAbsPath = $this->encodeAndValidatePathForDavex($dstAbsPath);
 
         $request = $this->getRequest(Request::MOVE, $srcAbsPath);
         $request->setDepth(Request::INFINITY);
@@ -673,17 +805,21 @@ class Client implements TransactionalTransportInterface
         $request->execute();
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function cloneFrom($srcWorkspace, $srcAbsPath, $destAbsPath, $removeExisting)
     {
         throw new NotImplementedException();
     }
 
-    // inherit all doc
-    public function storeNode(\PHPCR\NodeInterface $node)
+    /**
+     * {@inheritDoc}
+     */
+    public function storeNode(NodeInterface $node)
     {
         $path = $node->getPath();
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
 
         $buffer = array();
         $body = '<?xml version="1.0" encoding="UTF-8"?>';
@@ -698,10 +834,10 @@ class Client implements TransactionalTransportInterface
             // TODO: this will need to be changed when we refactor transport to use the diff format to store changes.
             if (strpos($e->getMessage(), "405") !== false && strpos($e->getMessage(), "MKCOL") !== false) {
                 // TODO: can the 405 exception be thrown for other reasons too?
-                throw new \PHPCR\ItemExistsException('This node probably already exists: '.$node->getPath(), $e->getCode(), $e);
+                throw new ItemExistsException('This node probably already exists: '.$node->getPath(), $e->getCode(), $e);
             }
             // TODO: can we throw any other more specific errors here?
-            throw new \PHPCR\RepositoryException('Something went wrong while saving node: '.$node->getPath(), $e->getCode(), $e);
+            throw new RepositoryException('Something went wrong while saving node: '.$node->getPath(), $e->getCode(), $e);
         }
 
         // store single-valued multivalue properties separately
@@ -724,13 +860,15 @@ class Client implements TransactionalTransportInterface
      * @param array $properties of this node
      * @param array $children nodes of this node
      * @param array $buffer list of xml strings to set multivalue properties
+     *
+     * @return string the xml for the node
      */
     protected function createNodeMarkup($path, $properties, $children, array &$buffer)
     {
         $body = '<sv:node xmlns:sv="http://www.jcp.org/jcr/sv/1.0" xmlns:nt="http://www.jcp.org/jcr/nt/1.0" sv:name="'.basename($path).'">';
 
         foreach ($properties as $name => $property) {
-            $type = \PHPCR\PropertyType::nameFromValue($property->getType());
+            $type = PropertyType::nameFromValue($property->getType());
             $nativeValue = $property->getValueForStorage();
             $valueBody = '';
             // handle multivalue properties
@@ -761,11 +899,13 @@ class Client implements TransactionalTransportInterface
         return $body . '</sv:node>';
     }
 
-    // inherit all doc
-    public function storeProperty(\PHPCR\PropertyInterface $property)
+    /**
+     * {@inheritDoc}
+     */
+    public function storeProperty(PropertyInterface $property)
     {
         $path = $property->getPath();
-        $path = $this->encodePathForDavex($path);
+        $path = $this->encodeAndValidatePathForDavex($path);
 
         $typeid = $property->getType();
         $type = PropertyType::nameFromValue($typeid);
@@ -816,15 +956,17 @@ class Client implements TransactionalTransportInterface
     protected function propertyToXmlString($value, $type)
     {
         switch ($type) {
-            case \PHPCR\PropertyType::TYPENAME_BOOLEAN:
+            case PropertyType::TYPENAME_BOOLEAN:
                 return $value ? 'true' : 'false';
-            case \PHPCR\PropertyType::TYPENAME_DATE:
+            case PropertyType::TYPENAME_DATE:
                 return PropertyType::convertType($value, PropertyType::STRING);
-            case \PHPCR\PropertyType::TYPENAME_BINARY:
-                return base64_encode(stream_get_contents($value));
-            case \PHPCR\PropertyType::TYPENAME_UNDEFINED:
-            case \PHPCR\PropertyType::TYPENAME_STRING:
-            case \PHPCR\PropertyType::TYPENAME_URI:
+            case PropertyType::TYPENAME_BINARY:
+                $ret = base64_encode(stream_get_contents($value));
+                fclose($value);
+                return $ret;
+            case PropertyType::TYPENAME_UNDEFINED:
+            case PropertyType::TYPENAME_STRING:
+            case PropertyType::TYPENAME_URI:
                 $value = str_replace(']]>',']]]]><![CDATA[>',$value);
                 return '<![CDATA['.$value.']]>';
         }
@@ -841,19 +983,21 @@ class Client implements TransactionalTransportInterface
     protected function propertyToRawString($value, $type)
     {
         switch ($type) {
-            case \PHPCR\PropertyType::TYPENAME_BINARY:
+            case PropertyType::TYPENAME_BINARY:
                 $ret = stream_get_contents($value);
                 fclose($value);
                 return $ret;
-            case \PHPCR\PropertyType::TYPENAME_UNDEFINED:
-            case \PHPCR\PropertyType::TYPENAME_STRING:
-            case \PHPCR\PropertyType::TYPENAME_URI:
+            case PropertyType::TYPENAME_UNDEFINED:
+            case PropertyType::TYPENAME_STRING:
+            case PropertyType::TYPENAME_URI:
                 return $value;
         }
         return $this->propertyToXmlString($value, $type);
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getNodePathForIdentifier($uuid)
     {
         $request = $this->getRequest(Request::REPORT, $this->workspaceUri);
@@ -870,19 +1014,21 @@ class Client implements TransactionalTransportInterface
         */
         $set = $dom->getElementsByTagNameNS(self::NS_DAV, 'href');
         if ($set->length != 1) {
-            throw new \PHPCR\RepositoryException('Unexpected answer from server: '.$dom->saveXML());
+            throw new RepositoryException('Unexpected answer from server: '.$dom->saveXML());
         }
         $fullPath = $set->item(0)->textContent;
         if (strncmp($this->workspaceUriRoot, $fullPath, strlen($this->workspaceUri))) {
-            throw new \PHPCR\RepositoryException(
+            throw new RepositoryException(
                 "Server answered a path that is not in the current workspace: uuid=$uuid, path=$fullPath, workspace=".
                 $this->workspaceUriRoot
             );
         }
-        return $this->stripServerRootFromUri(substr(\urldecode($fullPath),0,-1));
+        return $this->stripServerRootFromUri(substr(urldecode($fullPath),0,-1));
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getNamespaces()
     {
         $request = $this->getRequest(Request::REPORT, $this->workspaceUri);
@@ -893,7 +1039,7 @@ class Client implements TransactionalTransportInterface
         if ($dom->firstChild->localName != 'registerednamespaces-report'
             || $dom->firstChild->namespaceURI != self::NS_DCR
         ) {
-            throw new \PHPCR\RepositoryException('Error talking to the backend. '.$dom->saveXML());
+            throw new RepositoryException('Error talking to the backend. '.$dom->saveXML());
         }
 
         $mappings = array();
@@ -907,7 +1053,7 @@ class Client implements TransactionalTransportInterface
     /**
      * {@inheritDoc}
      *
-     * @throws \PHPCR\UnsupportedRepositoryOperationException if trying to
+     * @throws UnsupportedRepositoryOperationException if trying to
      *      overwrite existing prefix to new uri, as jackrabbit can not do this
      */
     public function registerNamespace($prefix, $uri)
@@ -922,7 +1068,7 @@ class Client implements TransactionalTransportInterface
                 return;
             }
             // unregister old mapping
-            throw new \PHPCR\UnsupportedRepositoryOperationException("Trying to set existing prefix $prefix from ".$namespaces[$prefix]." to different uri $uri, but unregistering namespace is not supported by jackrabbit backend. You can move the old namespace to a different prefix before adding this prefix to work around this issue.");
+            throw new UnsupportedRepositoryOperationException("Trying to set existing prefix $prefix from ".$namespaces[$prefix]." to different uri $uri, but unregistering namespace is not supported by jackrabbit backend. You can move the old namespace to a different prefix before adding this prefix to work around this issue.");
         }
 
         // if target uri already exists elsewhere, do not re-send or result is random
@@ -944,10 +1090,12 @@ class Client implements TransactionalTransportInterface
         return true;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function unregisterNamespace($prefix)
     {
-        throw new \PHPCR\UnsupportedRepositoryOperationException('Unregistering namespace not supported by jackrabbit backend');
+        throw new UnsupportedRepositoryOperationException('Unregistering namespace not supported by jackrabbit backend');
 
         /*
          * TODO: could look a bit like the following if the backend would support it
@@ -962,7 +1110,9 @@ class Client implements TransactionalTransportInterface
         */
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getNodeTypes($nodeTypes = array())
     {
         $request = $this->getRequest(Request::REPORT, $this->workspaceUriRoot);
@@ -971,17 +1121,21 @@ class Client implements TransactionalTransportInterface
         $dom = $request->executeDom();
 
         if ($dom->firstChild->localName != 'nodeTypes') {
-            throw new \PHPCR\RepositoryException('Error talking to the backend. '.$dom->saveXML());
+            throw new RepositoryException('Error talking to the backend. '.$dom->saveXML());
         }
 
         if ($this->typeXmlConverter === null) {
-            $this->typeXmlConverter = $this->factory->get('NodeType\NodeTypeXmlConverter');
+            $this->typeXmlConverter = $this->factory->get('NodeType\\NodeTypeXmlConverter');
         }
 
         return $this->typeXmlConverter->getNodeTypesFromXml($dom);
     }
 
-    // inherit all doc
+    // TransactionInterface //
+
+    /**
+     * {@inheritDoc}
+     */
     public function beginTransaction()
     {
         $request = $this->getRequest(Request::LOCK, $this->workspaceUriRoot);
@@ -997,17 +1151,19 @@ class Client implements TransactionalTransportInterface
         $hrefs = $dom->getElementsByTagNameNS(self::NS_DAV, 'href');
 
         if (!$hrefs->length) {
-            throw new \PHPCR\RepositoryException('No transaction token received');
+            throw new RepositoryException('No transaction token received');
         }
         $this->transactionToken = $hrefs->item(0)->textContent;
         return $this->transactionToken;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     protected function endTransaction($tag)
     {
         if ($tag != 'commit' && $tag != 'rollback') {
-            throw new \InvalidArgumentException('Expected \'commit\' or \'rollback\' as argument');
+            throw new InvalidArgumentException('Expected \'commit\' or \'rollback\' as argument');
         }
 
         $request = $this->getRequest(Request::UNLOCK, $this->workspaceUriRoot);
@@ -1021,25 +1177,35 @@ class Client implements TransactionalTransportInterface
         $this->transactionToken = false;
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function commitTransaction()
     {
         $this->endTransaction('commit');
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function rollbackTransaction()
     {
         $this->endTransaction('rollback');
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function setTransactionTimeout($seconds)
     {
         throw new NotImplementedException();
     }
 
-    // inherit all doc
+    // NodeTypeCndManagementInterface //
+
+    /**
+     * {@inheritDoc}
+     */
     public function registerNodeTypesCnd($cnd, $allowUpdate)
     {
         $request = $this->getRequest(Request::PROPPATCH, $this->workspaceUri);
@@ -1049,14 +1215,11 @@ class Client implements TransactionalTransportInterface
         return true;
     }
 
-    // inherit all doc
-    public function registerNodeTypes($types, $allowUpdate)
-    {
-        throw new NotImplementedException('TODO: convert node type definition to cnd format and call registerNodeTypesCnd');
-        //see http://jackrabbit.apache.org/node-type-notation.html
-    }
+    // PermissionInterface //
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function getPermissions($path)
     {
         // TODO: OPTIMIZE - once we have ACL this might be done without any server request
@@ -1066,10 +1229,10 @@ class Client implements TransactionalTransportInterface
                 '</dcr:privileges>';
 
         $valid_permissions = array(
-            \PHPCR\SessionInterface::ACTION_ADD_NODE,
-            \PHPCR\SessionInterface::ACTION_READ,
-            \PHPCR\SessionInterface::ACTION_REMOVE,
-            \PHPCR\SessionInterface::ACTION_SET_PROPERTY);
+            SessionInterface::ACTION_ADD_NODE,
+            SessionInterface::ACTION_READ,
+            SessionInterface::ACTION_REMOVE,
+            SessionInterface::ACTION_SET_PROPERTY);
 
         $result = array();
 
@@ -1083,7 +1246,7 @@ class Client implements TransactionalTransportInterface
                 foreach ($privilege->childNodes as $child) {
                     $permission = str_replace('dcr:', '', $child->tagName);
                     if (! in_array($permission, $valid_permissions)) {
-                        throw new \PHPCR\RepositoryException("Invalid permission '$permission'");
+                        throw new RepositoryException("Invalid permission '$permission'");
                     }
                     $result[] = $permission;
                 }
@@ -1092,6 +1255,71 @@ class Client implements TransactionalTransportInterface
 
         return $result;
     }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function lockNode($absPath, $isDeep, $isSessionScoped, $timeoutHint = PHP_INT_MAX, $ownerInfo = null)
+    {
+        $timeout = $timeoutHint === PHP_INT_MAX ? 'infinite' : $timeoutHint;
+        $ownerInfo = (null === $ownerInfo) ? $this->credentials->getUserID() : (string) $ownerInfo;
+
+        $depth = $isDeep ? Request::INFINITY : 0;
+
+        $lockScope = $isSessionScoped ? '<dcr:exclusive-session-scoped xmlns:dcr="http://www.day.com/jcr/webdav/1.0"/>' : '<D:exclusive/>';
+
+        $request = $this->getRequest(Request::LOCK, $absPath);
+        $request->addHeader('Timeout: Second-' . $timeout);
+        $request->setDepth($depth);
+
+        $request->setBody('<?xml version="1.0" encoding="utf-8"?>'.
+            '<D:lockinfo xmlns:D="' . self::NS_DAV . '">'.
+            '  <D:lockscope>' . $lockScope . '</D:lockscope>'.
+            '  <D:locktype><D:write/></D:locktype>'.
+            '  <D:owner>' . $ownerInfo . '</D:owner>' .
+            '</D:lockinfo>');
+
+        try {
+            $dom = $request->executeDom();
+            return $this->generateLockFromDavResponse($dom, true, $absPath);
+        } catch (\PHPCR\RepositoryException $ex) {
+            // TODO: can we move that into the request handling code that determines the correct exception to throw?
+            // Check if it's a 412 error, otherwise re-throw the same exception
+            if (preg_match('/Response \(HTTP 412\):/', $ex->getMessage())) {
+                throw new \PHPCR\Lock\LockException("Unable to lock the non-lockable node '$absPath': " . $ex->getMessage(), 412);
+            }
+
+            // Any other exception will simply be rethrown
+            throw $ex;
+        }
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function isLocked($absPath)
+    {
+        $request = $this->getRequest(Request::PROPFIND, $absPath);
+        $request->setBody($this->buildPropfindRequest(array('D:lockdiscovery')));
+        $request->setDepth(0);
+        $dom = $request->executeDom();
+
+        $lockInfo = $this->getRequiredDomElementByTagNameNS($dom, self::NS_DAV, 'lockdiscovery');
+
+        return $lockInfo->childNodes->length > 0;
+    }
+
+    /**
+     * {@inheritDoc}
+     */
+    public function unlock($absPath, $lockToken)
+    {
+        $request = $this->getRequest(Request::UNLOCK, $absPath);
+        $request->setLockToken($lockToken);
+        $request->execute();
+    }
+
+    // protected helper methods //
 
     /**
      * Build the xml required to register node types
@@ -1196,35 +1424,12 @@ class Client implements TransactionalTransportInterface
                '</D:href></dcr:locate-by-uuid>';
     }
 
-    // inherit all doc
+    /**
+     * {@inheritDoc}
+     */
     public function setNodeTypeManager($nodeTypeManager)
     {
         $this->nodeTypeManager = $nodeTypeManager;
-    }
-
-    /**
-     * Whether the path conforms to the specification and is supported by this implementation
-     *
-     * @see http://www.day.com/specs/jcr/2.0/3_Repository_Model.html#3.2.2%20Local%20Names
-     *
-     * TODO: the spec is extremly open and recommends to restrict further. We
-     * currently have rather random restrictions
-     *
-     * @param string $path The path to validate
-     *
-     * @return boolean always true, exception if this is not a valid path
-     *
-     * @throws RepositoryException if the path contains invalid characters
-     */
-    protected function ensureValidPath($path)
-    {
-        if (! (strpos($path, '//') === false
-              && strpos($path, '/../') === false
-              && preg_match('/^[\w{}\/#:^+~*\[\]\. <>"\'-]*$/i', $path))
-        ) {
-            throw new \PHPCR\RepositoryException('Path is not well-formed or contains invalid characters: ' . $path);
-        }
-        // if we allow MORE stuff, we might have to adapt encodePathForDavex for escaping
     }
 
     /**
@@ -1236,16 +1441,21 @@ class Client implements TransactionalTransportInterface
      *
      * @return string the cleaned path
      *
-     * @throws \PHPCR\RepositoryException If path is not absolute or invalid
+     * @throws RepositoryException If path is not absolute or invalid
      */
-    protected function encodePathForDavex($path)
+    protected function encodeAndValidatePathForDavex($path)
     {
-        if ('/' != substr($path, 0, 1)) {
-            //sanity check
-            throw new \PHPCR\RepositoryException("Implementation error: '$path' is not an absolute path");
+        $this->assertValidPath($path);
+
+        // TODO: encode everything except for the regexp below.
+        // the proper character list is http://stackoverflow.com/questions/1547899/which-characters-make-a-url-invalid
+        // use (raw)urlencode and then rebuild / and [] ?
+        $path = str_replace(' ', '%20', $path);
+        // sanity check (TODO if we use urlencode or similar, this is unnecessary)
+        if (! preg_match('/^[\w{}\/\'""#:^+~*\[\]\(\)\.,;=@<>%-]*$/i', $path)) {
+            throw new RepositoryException('Internal error: path valid but not properly encoded: '.$path);
         }
-        $this->ensureValidPath($path);
-        return str_replace(' ', '%20', $path); // TODO: does ensureValidPath allow other characters that should be encoded?
+        return $path;
     }
 
     /**
@@ -1266,16 +1476,150 @@ class Client implements TransactionalTransportInterface
      *
      * @param string $uri The absolute path in the current workspace or server uri
      * @return string The server uri with this path
-     * @throws \PHPCR\RepositoryException   If workspaceUri is missing (not logged in)
+     * @throws RepositoryException   If workspaceUri is missing (not logged in)
      */
     protected function addWorkspacePathToUri($uri)
     {
         if (substr($uri, 0, 1) === '/') {
             if (empty($this->workspaceUri)) {
-                throw new \PHPCR\RepositoryException("Implementation error: Please login before accessing content");
+                throw new RepositoryException("Implementation error: Please login before accessing content");
             }
             $uri = $this->workspaceUriRoot . $uri;
         }
         return $uri;
     }
+
+    /**
+     * Extract the information from a LOCK DAV response and create the
+     * corresponding Lock object.
+     *
+     * @param DOMElement $response
+     * @param bool $sessionOwning whether the current session is owning the lock (aka
+     *      we created it in this request)
+     * @param string $path the owning node path, if we created this node
+     *
+     * @return \Jackalope\Lock\Lock
+     */
+    protected function generateLockFromDavResponse($response, $sessionOwning = false, $path = null)
+    {
+        $lock = new Lock();
+        $lockDom = $this->getRequiredDomElementByTagNameNS($response, self::NS_DAV, 'activelock', "No lock received");
+
+        //var_dump($response->saveXML($lockDom));
+
+        // Check this is not a transaction lock
+        $type = $this->getRequiredDomElementByTagNameNS($lockDom, self::NS_DAV, 'locktype', 'No lock type received');
+        if (!$type->childNodes->length) {
+            $tagName = $type->childNodes->item(0)->localName;
+            if ($tagName !== 'write') {
+                throw new RepositoryException("Invalid lock type '$tagName'");
+            }
+        }
+
+        // Extract the lock scope
+        $scopeDom = $this->getRequiredDomElementByTagNameNS($lockDom, self::NS_DAV, 'lockscope', 'No lock scope in the received lock');
+        if ($this->getRequiredDomElementByTagNameNS($scopeDom, self::NS_DCR, 'exclusive-session-scoped')) {
+            $lock->setIsSessionScoped(true);
+        } elseif ($this->getRequiredDomElementByTagNameNS($scopeDom, self::NS_DAV, 'exclusive')) {
+            $lock->setIsSessionScoped(false);
+        } else {
+            // Unknown XML found in the <D:lockscope> tag
+            throw new RepositoryException('Invalid lock scope received: ' . $response->saveHTML($scopeDom));
+        }
+
+        // Extract the depth
+        $depthDom = $this->getRequiredDomElementByTagNameNS($lockDom, self::NS_DAV, 'depth', 'No depth in the received lock');
+        $lock->setIsDeep($depthDom->textContent === 'infinity');
+
+        // Extract the owner
+        $ownerDom = $this->getRequiredDomElementByTagNameNS($lockDom, self::NS_DAV, 'owner', 'No owner in the received lock');
+        $lock->setLockOwner($ownerDom->textContent);
+
+        // Extract the lock token
+        $tokenDom = $this->getRequiredDomElementByTagNameNS($lockDom, self::NS_DAV, 'href', 'No lock token in the received lock');
+        $lock->setLockToken($tokenDom->textContent);
+
+        // Extract the timeout
+        $timeoutDom = $this->getRequiredDomElementByTagNameNS($lockDom, self::NS_DAV, 'timeout', 'No lock timeout in the received lock');
+        $lock->setExpireTime($this->parseTimeout($timeoutDom->nodeValue));
+
+        $lock->setIsLockOwningSession($sessionOwning);
+        if (null !== $path) {
+            $lock->setNodePath($path);
+        } else {
+            throw new NotImplementedException('get the lock owning node or provide Lock with info so it can get it when requested');
+            // TODO: get the lock owning node
+            // Note that $n->getLock()->getNode() (where $n is a locked node) will only
+            // return $n if $n is the lock holder. If $n is in the subgraph of the lock
+            // holder, $h, then this call will return $h.
+        }
+
+        return $lock;
+    }
+
+    /**
+     * Retrieve a child DOM element from a DOM element.
+     * If the element is not found and $errorMessage is set, then a RepositoryException is thrown.
+     * If the element is not found and $errorMessage is empty, then false is returned.
+     *
+     * @throws \PHPCR\RepositoryException When the element is not found and an $errorMessage is set
+     *
+     * @param \DOMNode $dom The DOM element which content should be searched
+     * @param string $namespace The namespace of the searched element
+     * @param string $element The name of the searched element
+     * @param string $errorMessage The error message in case the element is not found
+     * @return bool|\DOMNode
+     */
+    protected function getRequiredDomElementByTagNameNS($dom, $namespace, $element, $errorMessage = '')
+    {
+        $list = $dom->getElementsByTagNameNS($namespace, $element);
+
+        if (!$list->length) {
+            if ($errorMessage) {
+                throw new RepositoryException($errorMessage);
+            }
+            return false;
+        }
+
+        return $list->item(0);
+    }
+
+    /**
+     * Parse the timeout value from a WebDAV response and calculate the expire
+     * timestamp.
+     *
+     * The timeout value follows the syntax defined in RFC2518: Timeout Header.
+     * Here we just parse the values in the form "Second-XXXX" or "Infinite".
+     * Any other value will produce an error.
+     *
+     * The function returns the unix epoch timestamp for the second when this
+     * lock will expire in case of normal timeout, or PHP_INT_MAX in case of an
+     * "Infinite" timeout.
+     *
+     * @param string $timeoutValue The timeout in seconds or PHP_INT_MAX for infinite
+     *
+     * @return int the expire timestamp to be used with Lock::setExpireTime,
+     *      that is when this lock expires in seconds since 1970 or null for inifinite
+     *
+     * @throws InvalidArgumentException if the timeout value can not be parsed
+     */
+    protected function parseTimeout($timeoutValue)
+    {
+        if ($timeoutValue === 'Inifite') {
+            return null;
+        }
+
+        if (preg_match('/Second\-([\d]+)/', $timeoutValue, $matches)) {
+            $time = $matches[1];
+        }
+
+        if (self::JCR_INFINITE_LOCK_TIMEOUT == $time || self::JCR_INFINITE_LOCK_TIMEOUT - 1 == $time) {
+            // prevent glitches due to second boundary during request
+            return null;
+        }
+        return time() + $time;
+
+        throw new \InvalidArgumentException("Invalid timeout value '$timeoutValue'");
+    }
+
 }

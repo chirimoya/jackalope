@@ -2,9 +2,16 @@
 
 namespace Jackalope\NodeType;
 
-use DOMElement, DOMXPath, ArrayObject;
-use Jackalope\Helper;
 use DOMDocument;
+use DOMElement;
+use DOMXPath;
+use ArrayObject;
+
+use PHPCR\PropertyType;
+use PHPCR\Version\OnParentVersionAction;
+
+use Jackalope\Helper;
+use Jackalope\FactoryInterface;
 
 /**
  * Converter to generate NodeType elements array from storage XML (jackrabbit
@@ -32,13 +39,15 @@ class NodeTypeXmlConverter
      *
      * Everything inside jackalope has to accept the factory in the
      * constructor. We define the constructor but to nothing at all.
+     *
+     * @param FactoryInterface $factory the object factory
      */
-    public function __construct($factory)
+    public function __construct(FactoryInterface $factory)
     {
     }
 
     /**
-     * @param \DOMElement $node
+     * @param DOMElement $node
      *
      * @return array
      */
@@ -50,7 +59,7 @@ class NodeTypeXmlConverter
         $data['isAutoCreated'] = Helper::getBoolAttribute($node, 'autoCreated');
         $data['isMandatory'] = Helper::getBoolAttribute($node, 'mandatory');
         $data['isProtected'] = Helper::getBoolAttribute($node, 'protected');
-        $data['onParentVersion'] = \PHPCR\Version\OnParentVersionAction::valueFromName($node->getAttribute('onParentVersion'));
+        $data['onParentVersion'] = OnParentVersionAction::valueFromName($node->getAttribute('onParentVersion'));
 
         return $data;
     }
@@ -58,7 +67,7 @@ class NodeTypeXmlConverter
     /**
      * Convert property definition xml into array.
      *
-     * @param \DOMElement $node
+     * @param DOMElement $node
      *
      * @return array
      */
@@ -66,7 +75,7 @@ class NodeTypeXmlConverter
     {
         $data = $this->getItemDefinitionFromXml($node);
 
-        $data['requiredType'] = \PHPCR\PropertyType::valueFromName($node->getAttribute('requiredType'));
+        $data['requiredType'] = PropertyType::valueFromName($node->getAttribute('requiredType'));
         $data['multiple'] = Helper::getBoolAttribute($node, 'multiple');
         $data['fullTextSearchable'] = Helper::getBoolAttribute($node, 'fullTextSearchable');
         $data['queryOrderable'] = Helper::getBoolAttribute($node, 'queryOrderable');
@@ -92,7 +101,7 @@ class NodeTypeXmlConverter
     /**
      * Convert Node Definition XML into array.
      *
-     * @param \DOMElement $node
+     * @param DOMElement $node
      *
      * @return array
      */
@@ -120,7 +129,7 @@ class NodeTypeXmlConverter
     /**
      * Convert NodeTypeDefintion XML into array.
      *
-     * @param \DOMElement $node
+     * @param DOMElement $node
      *
      * @return array
      */
@@ -160,7 +169,7 @@ class NodeTypeXmlConverter
 
     public function getNodeTypesFromXml(DOMDocument $dom)
     {
-        $xp = new \DOMXpath($dom);
+        $xp = new DOMXpath($dom);
         $nodeTypesElements = $xp->query('/nodeTypes/nodeType');
         $nodeTypes = array();
         foreach ($nodeTypesElements as $nodeTypeElement) {

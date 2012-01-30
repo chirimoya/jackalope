@@ -47,6 +47,7 @@ class QOMWalker
         if (!isset($this->alias[$selectorAlias])) {
             $this->alias[$selectorAlias] = "n" . count($this->alias);
         }
+
         return $this->alias[$selectorAlias];
     }
 
@@ -55,12 +56,13 @@ class QOMWalker
         $sql = "SELECT ";
         $sql .= $this->walkColumns($qom->getColumns()) . " ";
         $sql .= $this->walkSource($qom->getSource());
-        if ($contraint = $qom->getConstraint()) {
-            $sql .= " AND " . $this->walkConstraint($contraint);
+        if ($constraint = $qom->getConstraint()) {
+            $sql .= " AND " . $this->walkConstraint($constraint);
         }
         if ($orderings = $qom->getOrderings()) {
             $sql .= " " . $this->walkOrderings($orderings);
         }
+
         return $sql;
     }
 
@@ -82,7 +84,6 @@ class QOMWalker
 
     public function walkColumn(QOM\ColumnInterface $column)
     {
-
     }
 
     public function walkSource(QOM\SourceInterface $source)
@@ -97,7 +98,7 @@ class QOMWalker
         $subTypes = $this->nodeTypeManager->getSubtypes($source->getNodeTypeName());
         foreach ($subTypes as $subType) {
             /* @var $subType PHPCR\NodeType\NodeTypeInterface */
-            $sql .= ", '" . $subType . "'";
+            $sql .= ", '" . $subType->getName() . "'";
         }
         $sql .= ')';
 
@@ -114,17 +115,17 @@ class QOMWalker
             return $this->walkNotConstraint($constraint);
         } elseif ($constraint instanceof QOM\ComparisonInterface) {
             return $this->walkComparisonConstraint($constraint);
-        } elseif ($contraint instanceof QOM\DescendantNodeInterface) {
+        } elseif ($constraint instanceof QOM\DescendantNodeInterface) {
             return $this->walkDescendantNodeConstraint($constraint);
         } elseif ($constraint instanceof QOM\ChildNodeInterface) {
             return $this->walkChildNodeConstraint($constraint);
         } elseif ($constraint instanceof QOM\PropertyExistenceInterface) {
             return $this->walkPropertyExistanceConstraint($constraint);
         } elseif ($constraint instanceof QOM\SameNodeInterface) {
-            return $this->walkSameNodeConstraint($contraint);
-        } else {
-            throw new \PHPCR\Query\InvalidQueryException("Constraint " . get_class($constraint) . " not yet supported.");
+            return $this->walkSameNodeConstraint($constraint);
         }
+
+        throw new \PHPCR\Query\InvalidQueryException("Constraint " . get_class($constraint) . " not yet supported.");
     }
 
     public function walkSameNodeConstraint(QOM\SameNodeInterface $constraint)
@@ -212,9 +213,9 @@ class QOMWalker
             return "!=";
         } elseif ($operator == QOM\QueryObjectModelConstantsInterface::JCR_OPERATOR_LIKE) {
             return "LIKE";
-        } else {
-            return $operator; // no-op for simplicity, not standard conform (but using the constants is a pain)
         }
+
+        return $operator; // no-op for simplicity, not standard conform (but using the constants is a pain)
     }
 
     /**
@@ -245,24 +246,22 @@ class QOMWalker
                 return $alias . ".path";
             } elseif ($property == "jcr:uuid") {
                 return $alias . ".identifier";
-            } else {
-                return $this->sqlXpathExtractValue($alias, $property);
             }
-        } elseif ($operand instanceof QOM\LengthInterface) {
 
+            return $this->sqlXpathExtractValue($alias, $property);
+        } elseif ($operand instanceof QOM\LengthInterface) {
             $alias = $this->getTableAlias($operand->getPropertyValue()->getSelectorName());
             $property = $operand->getPropertyValue()->getPropertyName();
             if ($property == "jcr:path") {
                 return $alias . ".path";
             } elseif ($property == "jcr:uuid") {
                 return $alias . ".identifier";
-            } else {
-                return $this->sqlXpathExtractValue($alias, $property);
             }
 
-        } else {
-            throw new \PHPCR\Query\InvalidQueryException("Dynamic operand " . get_class($operand) ." not yet supported.");
+            return $this->sqlXpathExtractValue($alias, $property);
         }
+
+        throw new \PHPCR\Query\InvalidQueryException("Dynamic operand " . get_class($operand) . " not yet supported.");
     }
 
     public function walkOrderings(array $orderings)
@@ -293,9 +292,9 @@ class QOMWalker
             return "EXTRACTVALUE($alias.props, 'count(//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1])') = 1";
         } elseif ($this->platform instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) {
             return "xpath_exists('//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1]', CAST($alias.props AS xml), ".$this->sqlXpathPostgreSQLNamespaces().") = 't'";
-        } else {
-            throw new \Jackalope\NotImplementedException("Xpath evaluations cannot be executed with '" . $this->platform->getName() . "' yet.");
         }
+
+        throw new \Jackalope\NotImplementedException("Xpath evaluations cannot be executed with '" . $this->platform->getName() . "' yet.");
     }
 
     /**
@@ -311,9 +310,9 @@ class QOMWalker
             return "EXTRACTVALUE($alias.props, '//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1]')";
         } elseif ($this->platform instanceof \Doctrine\DBAL\Platforms\PostgreSqlPlatform) {
             return "(xpath('//sv:property[@sv:name=\"" . $property . "\"]/sv:value[1]/text()', CAST($alias.props AS xml), ".$this->sqlXpathPostgreSQLNamespaces()."))[1]::text";
-        } else {
-            throw new \Jackalope\NotImplementedException("Xpath evaluations cannot be executed with '" . $this->platform->getName() . "' yet.");
         }
+
+        throw new \Jackalope\NotImplementedException("Xpath evaluations cannot be executed with '" . $this->platform->getName() . "' yet.");
     }
 
     private function sqlXpathPostgreSQLNamespaces()

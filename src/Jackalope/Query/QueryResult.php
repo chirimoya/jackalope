@@ -4,7 +4,7 @@ namespace Jackalope\Query;
 
 use Jackalope\ObjectManager;
 use Jackalope\NotImplementedException;
-use Jackalope\Factory;
+use Jackalope\FactoryInterface;
 
 use PHPCR\Query\QueryResultInterface;
 
@@ -16,18 +16,18 @@ use IteratorAggregate;
 class QueryResult implements IteratorAggregate, QueryResultInterface
 {
     /**
-     * @var \Jackalope\ObjectManager
+     * @var ObjectManager
      */
     protected $objectmanager;
 
     /**
-     * @var \Jackalope\Factory
+     * @var FactoryInterface
      */
     protected $factory;
 
     /**
      * Storing the query result raw data in the format documented at
-     * \Jackalope\TransportInterface::query()
+     * \Jackalope\Transport\QueryInterface::query()
      * @var array
      */
     protected $rows = array();
@@ -36,14 +36,13 @@ class QueryResult implements IteratorAggregate, QueryResultInterface
      * Create a new query result from raw data from transport.
      *
      * The raw data format is documented in
-     * \Jackalope\TransportInterface::query()
+     * \Jackalope\Transport\QueryInterface::query()
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param array $rawData the data as returned by the transport
      * @param ObjectManager $objectManager
      */
-    public function __construct(Factory $factory, $rawData, ObjectManager $objectmanager)
+    public function __construct(FactoryInterface $factory, $rawData, ObjectManager $objectmanager)
     {
         $this->factory = $factory;
         $this->rows = $rawData;
@@ -80,7 +79,12 @@ class QueryResult implements IteratorAggregate, QueryResultInterface
 
         foreach ($this->rows as $row) {
             foreach ($row as $columns) {
-                $columnNames[] = $columns['dcr:name'];
+                if ('jcr:path' != substr($columns['dcr:name'], -8)
+                    && 'jcr:score' != substr($columns['dcr:name'], -9)
+                ) {
+                    // skip the meta information path and score that is also in the raw result table
+                    $columnNames[] = $columns['dcr:name'];
+                }
             }
         }
 
@@ -109,12 +113,8 @@ class QueryResult implements IteratorAggregate, QueryResultInterface
         }
 
         $paths = array();
-        foreach ($this->rows as $row) {
-            foreach ($row as $column) {
-                if ('jcr:path' === $column['dcr:name']) {
-                    $paths[] = $column['dcr:value'];
-                }
-            }
+        foreach ($this->getRows() as $row) {
+            $paths[] = $row->getPath();
         }
 
         return $this->objectmanager->getNodesByPath($paths);

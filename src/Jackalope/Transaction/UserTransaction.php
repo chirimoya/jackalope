@@ -1,17 +1,28 @@
 <?php
+
 namespace Jackalope\Transaction;
 
-// inherit all doc
+use PHPCR\Transaction\UserTransactionInterface;
+use PHPCR\UnsupportedRepositoryOperationException;
+use PHPCR\RepositoryException;
+use PHPCR\SessionInterface;
+
+use Jackalope\Transport\TransactionInterface;
+use Jackalope\FactoryInterface;
+use Jackalope\ObjectManager;
+
+use LogicException;
+
 /**
  * @author Johannes Stark <starkj@gmx.de>
  *
  * @api
  */
-class UserTransaction implements \PHPCR\Transaction\UserTransactionInterface
+class UserTransaction implements UserTransactionInterface
 {
     /**
      * The factory to instantiate objects
-     * @var \Jackalope\Factory
+     * @var FactoryInterface
      */
     protected $factory;
 
@@ -22,8 +33,13 @@ class UserTransaction implements \PHPCR\Transaction\UserTransactionInterface
     protected $session;
 
     /**
-     * Instance of an implementation of the TransportInterface
-     * @var \Jackalope\TransportInterface
+     * @var \Jackalope\ObjectManager
+     */
+    protected $objectManager;
+
+    /**
+     * Instance of an implementation of the TransactionInterface transport
+     * @var \Jackalope\Transport\TransactionInterface
      */
     protected $transport;
 
@@ -37,27 +53,28 @@ class UserTransaction implements \PHPCR\Transaction\UserTransactionInterface
     /**
      * Registers the provided parameters as attribute to the instance.
      *
-     * @param object $factory  an object factory implementing get() as
-     *      described in \Jackalope\Factory
-     * @param \Jackalope\TransportInterface $transport
-     * @param \PHPCR\SessionInterface $session
+     * @param FactoryInterface $factory the object factory
+     * @param TransportInterface $transport
+     * @param SessionInterface $session
      */
-    public function __construct($factory, \Jackalope\TransportInterface $transport, \PHPCR\SessionInterface $session)
+    public function __construct(FactoryInterface $factory, TransactionInterface $transport,
+                                SessionInterface $session, ObjectManager $om)
     {
         $this->factory = $factory;
         $this->transport = $transport;
         $this->session = $session;
-        $this->objectManager = $session->getObjectManager();
+        $this->objectManager = $om;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function begin()
     {
         if ($this->inTransaction) {
-            throw new \PHPCR\UnsupportedRepositoryOperationException("Nested transactions are not supported.");
+            throw new UnsupportedRepositoryOperationException("Nested transactions are not supported.");
         }
 
         $this->objectManager->beginTransaction();
@@ -75,14 +92,13 @@ class UserTransaction implements \PHPCR\Transaction\UserTransactionInterface
     public function commit()
     {
         if (! $this->inTransaction) {
-            throw new \LogicException("No transaction to commit.");
+            throw new LogicException("No transaction to commit.");
         }
 
         $this->objectManager->commitTransaction();
         $this->inTransaction = false;
     }
 
-    // inherit all doc
     /**
      * {@inheritDoc}
      *
@@ -94,7 +110,6 @@ class UserTransaction implements \PHPCR\Transaction\UserTransactionInterface
         return $this->inTransaction;
     }
 
-    // inherit all doc
     /**
      * {@inheritDoc}
      *
@@ -106,21 +121,22 @@ class UserTransaction implements \PHPCR\Transaction\UserTransactionInterface
     public function rollback()
     {
         if (! $this->inTransaction) {
-            throw new \LogicException("No transaction to rollback.");
+            throw new LogicException("No transaction to rollback.");
         }
 
         $this->objectManager->rollbackTransaction();
         $this->inTransaction = false;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setTransactionTimeout($seconds = 0)
     {
         if ($seconds < 0) {
-            throw new \PHPCR\RepositoryException("Value must be possitiv or 0. ". $seconds ." given.");
+            throw new RepositoryException("Value must be positive or 0. ". $seconds ." given.");
         }
         $this->transport->setTransactionTimeout($seconds);
     }

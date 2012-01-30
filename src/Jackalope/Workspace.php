@@ -1,15 +1,30 @@
 <?php
 namespace Jackalope;
 
-// inherit all doc
+use PHPCR\WorkspaceInterface;
+use PHPCR\UnsupportedRepositoryOperationException;
+
+use PHPCR\Transaction\UserTransactionInterface;
+
+use Jackalope\NodeType\NodeTypeManager;
+
+use Jackalope\Transport\QueryInterface;
+use Jackalope\Transport\WritingInterface;
+use Jackalope\Transport\WorkspaceManagementInterface;
+use Jackalope\Transport\VersioningInterface;
+use Jackalope\Transport\TransactionInterface;
+use Jackalope\Transport\LockingInterface;
+
 /**
+ * {@inheritDoc}
+ *
  * @api
  */
-class Workspace implements \PHPCR\WorkspaceInterface
+class Workspace implements WorkspaceInterface
 {
     /**
      * The factory to instantiate objects
-     * @var Factory
+     * @var FactoryInterface
      */
     protected $factory;
     /**
@@ -17,11 +32,11 @@ class Workspace implements \PHPCR\WorkspaceInterface
      */
     protected $session;
     /**
-     * @var Jackalope\NodeType\NodeTypeManager
+     * @var NodeTypeManager
      */
     protected $nodeTypeManager;
     /**
-     * @var \PHPCR\Transaction\UserTransactionInterface
+     * @var UserTransactionInterface
      */
     protected $utx = null;
     /**
@@ -37,24 +52,29 @@ class Workspace implements \PHPCR\WorkspaceInterface
     protected $namespaceRegistry;
 
     /**
+     * @var \Jackalope\Lock\LockManager
+     */
+    protected $lockManager;
+
+    /**
      * Instantiate a workspace referencing a workspace in the storage.
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param Session $session
      * @param ObjectManager $objectManager
      * @param string $name the workspace name that is used
      */
-    public function __construct($factory, Session $session, ObjectManager $objectManager, $name)
+    public function __construct(FactoryInterface $factory, Session $session, ObjectManager $objectManager, $name)
     {
         $this->factory = $factory;
         $this->session = $session;
-        $this->nodeTypeManager = $this->factory->get('NodeType\NodeTypeManager', array($objectManager));
+        $this->nodeTypeManager = $this->factory->get('NodeType\\NodeTypeManager', array($objectManager));
         $this->name = $name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getSession()
@@ -62,8 +82,9 @@ class Workspace implements \PHPCR\WorkspaceInterface
         return $this->session;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getName()
@@ -71,8 +92,9 @@ class Workspace implements \PHPCR\WorkspaceInterface
         return $this->name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function copy($srcAbsPath, $destAbsPath, $srcWorkspace = null)
@@ -80,16 +102,17 @@ class Workspace implements \PHPCR\WorkspaceInterface
         $this->session->getObjectManager()->copyNodeImmediately($srcAbsPath, $destAbsPath, $srcWorkspace);
     }
 
-    // inherit all doc
     /**
      * {@inheritDoc}
      *
-     * TODO: Implement
      * @api
      */
-    //clone is a reserved keyword in php and may not be used as a function name.
     public function cloneFrom($srcWorkspace, $srcAbsPath, $destAbsPath, $removeExisting)
     {
+        if (! $this->transport instanceof WritingInterface) {
+            throw new UnsupportedRepositoryOperationException('Transport does not support writing');
+        }
+
         throw new NotImplementedException('Write');
         /* @param boolean $removeExisting if false then this method throws an ItemExistsException on identifier conflict
          *                                with an incoming node. If true then a identifier conflict is resolved by removing
@@ -100,8 +123,9 @@ class Workspace implements \PHPCR\WorkspaceInterface
          */
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function move($srcAbsPath, $destAbsPath)
@@ -109,24 +133,44 @@ class Workspace implements \PHPCR\WorkspaceInterface
         $this->session->getObjectManager()->moveNodeImmediately($srcAbsPath, $destAbsPath);
     }
 
-    // inherit all doc
+
     /**
-     * Locking is not implemented in Jackalope
+     * {@inheritDoc}
      *
      * @api
      */
     public function getLockManager()
     {
-        throw new \PHPCR\UnsupportedRepositoryOperationException();
+        if (! $this->session->getTransport() instanceof LockingInterface) {
+            throw new UnsupportedRepositoryOperationException('Transport does not support locking');
+        }
+
+        if (is_null($this->lockManager)) {
+            $this->lockManager = $this->factory->get(
+                'Lock\\LockManager',
+                array(
+                    $this->session->getObjectManager(),
+                    $this->session,
+                    $this->session->getTransport()
+                )
+            );
+        }
+
+        return $this->lockManager;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getQueryManager()
     {
-        return $this->factory->get('Query\QueryManager', array($this->session->getObjectManager()));
+        if (! $this->session->getTransport() instanceof QueryInterface) {
+            throw new UnsupportedRepositoryOperationException('Transport does not support queries');
+        }
+
+        return $this->factory->get('Query\\QueryManager', array($this->session->getObjectManager()));
     }
 
     /**
@@ -135,30 +179,40 @@ class Workspace implements \PHPCR\WorkspaceInterface
      * Called by the repository if transactions are enabled. Transactions are
      * enabled if this is called with a non-null argument, disabled otherwise.
      *
-     * @param \PHPCR\Transaction\UserTransactionInterface $utx A
+     * @param UserTransactionInterface $utx A
      *      UserTransaction object
      *
      * @private
      */
-    public function setTransactionManager(\PHPCR\Transaction\UserTransactionInterface $utx)
+    public function setTransactionManager(UserTransactionInterface $utx)
     {
+        if (! $this->session->getTransport() instanceof TransactionInterface) {
+            throw new UnsupportedRepositoryOperationException('Transport does not support transactions');
+        }
+
         $this->utx = $utx;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getTransactionManager()
     {
+        if (! $this->session->getTransport() instanceof TransactionInterface) {
+            throw new UnsupportedRepositoryOperationException('Transport does not support transactions');
+        }
+
         if (! $this->utx) {
-            throw new \PHPCR\UnsupportedRepositoryOperationException('Transactions are currently disabled');
+            throw new UnsupportedRepositoryOperationException('Transactions are currently disabled');
         }
         return $this->utx;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNamespaceRegistry()
@@ -169,8 +223,9 @@ class Workspace implements \PHPCR\WorkspaceInterface
         return $this->namespaceRegistry;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNodeTypeManager()
@@ -179,26 +234,32 @@ class Workspace implements \PHPCR\WorkspaceInterface
     }
 
     /**
-     * Observation is not supported in Jackalope
+     * {@inheritDoc}
      *
      * @api
      */
     public function getObservationManager()
     {
-        throw new \PHPCR\UnsupportedRepositoryOperationException();
+        throw new UnsupportedRepositoryOperationException();
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getVersionManager()
     {
-        return $this->factory->get('Version\VersionManager', array($this->session->getObjectManager()));
+        if (! $this->session->getTransport() instanceof VersioningInterface) {
+            throw new UnsupportedRepositoryOperationException('Transport does not support versioning');
+        }
+
+        return $this->factory->get('Version\\VersionManager', array($this->session->getObjectManager()));
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAccessibleWorkspaceNames()
@@ -207,7 +268,7 @@ class Workspace implements \PHPCR\WorkspaceInterface
     }
 
     /**
-     * Importing is not implemented in jackalope
+     * {@inheritDoc}
      *
      * @api
      */
@@ -216,23 +277,31 @@ class Workspace implements \PHPCR\WorkspaceInterface
         throw new NotImplementedException('Write');
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function createWorkspace($name, $srcWorkspace = null)
     {
+        if (! $this->session->getTransport() instanceof WorkspaceManagementInterface) {
+            throw new UnsupportedRepositoryOperationException('Transport does not support workspace management');
+        }
+
         return $this->session->getTransport()->createWorkspace($name, $srcWorkspace);
     }
 
-    // inherit all doc
     /**
-     * Deleting workspaces is not implemented in Jackalope
+     * {@inheritDoc}
      *
      * @api
      */
     public function deleteWorkspace($name)
     {
-        throw new \PHPCR\UnsupportedRepositoryOperationException();
+        if (! $this->session->getTransport() instanceof WorkspaceManagementInterface) {
+            throw new UnsupportedRepositoryOperationException('Transport does not support workspace management');
+        }
+
+        throw new UnsupportedRepositoryOperationException();
     }
 }

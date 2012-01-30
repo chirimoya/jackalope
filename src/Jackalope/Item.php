@@ -1,5 +1,16 @@
 <?php
+
 namespace Jackalope;
+
+use LogicException;
+
+use PHPCR\PropertyInterface;
+use PHPCR\ItemInterface;
+use PHPCR\ItemVisitorInterface;
+use PHPCR\RepositoryInterface;
+use PHPCR\RepositoryException;
+use PHPCR\ItemNotFoundException;
+use PHPCR\InvalidItemStateException;
 
 /**
  * Item base class with common functionality
@@ -21,7 +32,7 @@ namespace Jackalope;
  *
  * For the special case of Item state after a failed transaction, see Item::rollbackTransaction()
  */
-abstract class Item implements \PHPCR\ItemInterface
+abstract class Item implements ItemInterface
 {
     /**
      * The item needs to be created in the backend on Session::save()
@@ -74,7 +85,7 @@ abstract class Item implements \PHPCR\ItemInterface
         self::STATE_DELETED,
     );
 
-    /** @var object   The jackalope object factory for this object */
+    /** @var FactoryInterface   The jackalope object factory for this object */
     protected $factory;
 
     /** @var Session    The session this item belongs to */
@@ -107,23 +118,21 @@ abstract class Item implements \PHPCR\ItemInterface
     /**
      * Initialize basic information common to nodes and properties
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param string $path The normalized and absolute path to this item
      * @param Session $session
      * @param ObjectManager $objectManager
      * @param boolean $new can be set to true to tell the object that it has
      *      been created locally
      */
-    protected function __construct($factory, $path, Session $session,
-                                   ObjectManager $objectManager, $new = false)
+    protected function __construct(FactoryInterface $factory, $path, Session $session, ObjectManager $objectManager, $new = false)
     {
         $this->factory = $factory;
         $this->session = $session;
         $this->objectManager = $objectManager;
         $this->setState($new ? self::STATE_NEW : self::STATE_CLEAN);
         if (! $new
-            && $session->getRepository()->getDescriptor(\PHPCR\RepositoryInterface::OPTION_TRANSACTIONS_SUPPORTED)
+            && $session->getRepository()->getDescriptor(RepositoryInterface::OPTION_TRANSACTIONS_SUPPORTED)
         ) {
             if ($session->getWorkspace()->getTransactionManager()->inTransaction()) {
                 // properly set previous state in case we get into a rollback
@@ -156,8 +165,9 @@ abstract class Item implements \PHPCR\ItemInterface
         $this->parentPath = (('/' == $path) ? null : strtr(dirname($path), '\\', '/'));
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getPath()
@@ -166,8 +176,9 @@ abstract class Item implements \PHPCR\ItemInterface
         return $this->path;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getName()
@@ -176,8 +187,9 @@ abstract class Item implements \PHPCR\ItemInterface
         return $this->name;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getAncestor($depth)
@@ -185,7 +197,7 @@ abstract class Item implements \PHPCR\ItemInterface
         $this->checkState();
 
         if ($depth < 0 || $depth > $this->depth) {
-            throw new \PHPCR\ItemNotFoundException('Depth must be between 0 and '.$this->depth.' for this Item');
+            throw new ItemNotFoundException('Depth must be between 0 and '.$this->depth.' for this Item');
         }
         if ($depth == $this->depth) {
             return $this;
@@ -194,21 +206,23 @@ abstract class Item implements \PHPCR\ItemInterface
         return $this->objectManager->getNodeByPath($ancestorPath);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getParent()
     {
         $this->checkState();
         if (is_null($this->parentPath)) {
-            throw new \PHPCR\ItemNotFoundException('The root node has no parent');
+            throw new ItemNotFoundException('The root node has no parent');
         }
         return $this->objectManager->getNodeByPath($this->parentPath);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDepth()
@@ -217,8 +231,9 @@ abstract class Item implements \PHPCR\ItemInterface
         return $this->depth;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getSession()
@@ -227,8 +242,9 @@ abstract class Item implements \PHPCR\ItemInterface
         return $this->session;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isNode()
@@ -237,8 +253,9 @@ abstract class Item implements \PHPCR\ItemInterface
         return $this->isNode;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isNew()
@@ -246,8 +263,9 @@ abstract class Item implements \PHPCR\ItemInterface
         return $this->state === self::STATE_NEW;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isModified()
@@ -297,11 +315,12 @@ abstract class Item implements \PHPCR\ItemInterface
         return $this->state === self::STATE_CLEAN;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
-    public function isSame(\PHPCR\ItemInterface $otherItem)
+    public function isSame(ItemInterface $otherItem)
     {
         $this->checkState();
 
@@ -316,30 +335,31 @@ abstract class Item implements \PHPCR\ItemInterface
                 if ($this->uuid == $otherItem->getIdentifier()) {
                     return true;
                 }
-            } else { // assert($this instanceof Property)
-                if ($this->name == $otherItem->getName()
-                    && $this->getParent()->isSame($otherItem->getParent())
-                ) {
-                        return true;
-                }
+                // assert($this instanceof Property)
+            } elseif ($this->name == $otherItem->getName()
+                && $this->getParent()->isSame($otherItem->getParent())
+            ) {
+                return true;
             }
         }
         return false;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
-    public function accept(\PHPCR\ItemVisitorInterface $visitor)
+    public function accept(ItemVisitorInterface $visitor)
     {
         $this->checkState();
 
         $visitor->visit($this);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function remove()
@@ -348,10 +368,10 @@ abstract class Item implements \PHPCR\ItemInterface
 
         // sanity checks
         if ($this->getDepth() == 0) {
-            throw new \PHPCR\RepositoryException('Cannot remove root node');
+            throw new RepositoryException('Cannot remove root node');
         }
 
-        if ($this instanceof \PHPCR\PropertyInterface) {
+        if ($this instanceof PropertyInterface) {
             $this->objectManager->removeItem($this->parentPath, $this);
         } else {
             $this->objectManager->removeItem($this->path);
@@ -437,14 +457,15 @@ abstract class Item implements \PHPCR\ItemInterface
      * Change the state of the item
      *
      * @param int $state The new item state, one of the state constants
-     * @throws \PHPCR\InvalidItemStateException
+     *
+     * @throws RepositoryException
      *
      * @private
      */
     private function setState($state)
     {
         if (! in_array($state, $this->available_states)) {
-            throw new \PHPCR\RepositoryException("Invalid state [$state]");
+            throw new RepositoryException("Invalid state [$state]");
         }
         $this->state = $state;
 
@@ -468,17 +489,16 @@ abstract class Item implements \PHPCR\ItemInterface
      * if it is DIRTY).
      *
      * @return void
-     * @throws \PHPCR\InvalidItemStateException When an operation is attempted on a deleted item
+     * @throws InvalidItemStateException When an operation is attempted on a deleted item
      * @private
      */
     protected function checkState()
     {
         if ($this->state === self::STATE_DELETED) {
-            throw new \PHPCR\InvalidItemStateException("The item was deleted");
+            throw new InvalidItemStateException("The item was deleted");
         }
 
         if ($this->isDirty()) {
-
             $this->refresh($this->keepChanges);
             $this->setClean();
         }
@@ -557,8 +577,11 @@ abstract class Item implements \PHPCR\ItemInterface
      * </table>
      *
      * @return void
-     * @throws \LogicException if an unexpected state transition is encountered
+     *
+     * @throws LogicException if an unexpected state transition is encountered
+     *
      * @private
+     *
      * @see ObjectManager::rollbackTransaction()
      */
     public function rollbackTransaction()
@@ -604,7 +627,7 @@ abstract class Item implements \PHPCR\ItemInterface
 
             // There is some special case we didn't think of, for the moment throw an exception
             // TODO: figure out if this might happen or not
-            throw new \LogicException("There was an unexpected state transition during the transaction: " .
+            throw new LogicException("There was an unexpected state transition during the transaction: " .
                                       "old state = {$this->savedState}, new state = {$this->state}");
         }
 

@@ -2,8 +2,20 @@
 
 namespace Jackalope;
 
+use Exception;
+use LogicException;
 use ArrayIterator;
+use IteratorAggregate;
+use InvalidArgumentException;
+
+use PHPCR\PropertyInterface;
 use PHPCR\PropertyType;
+use PHPCR\RepositoryException;
+use PHPCR\ValueFormatException;
+use PHPCR\InvalidItemStateException;
+use PHPCR\ItemNotFoundException;
+
+use PHPCR\NodeType\PropertyDefinitionInterface;
 
 /**
  * The Jackalope in-memory representation of a property.
@@ -11,7 +23,7 @@ use PHPCR\PropertyType;
  * This is an Item and follows the property interface - see the base class and
  * interface for more documentation.
  */
-class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterface
+class Property extends Item implements IteratorAggregate, PropertyInterface
 {
     /**
      * flag to know if binary streams should be wrapped or retrieved
@@ -47,14 +59,14 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
      */
     protected $isMultiple = false;
     /**
-     * the type constant from \PHPCR\PropertyType
+     * the type constant from PropertyType
      * @var int
      */
     protected $type;
 
     /**
      * cached instance of the property definition that defines this property
-     * @var \PHPCR\NodeType\PropertyDefinitionInterface
+     * @var PropertyDefinitionInterface
      * @see Property::getDefinition()
      */
     protected $definition;
@@ -70,10 +82,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
      * For binary properties, the value is the length of the data(s), not the
      * data itself.
      *
-     * @param object $factory an object factory implementing "get" as
-     *      described in \Jackalope\Factory
+     * @param FactoryInterface $factory the object factory
      * @param array $data array with fields <tt>type</tt> (integer or string
-     *      from \PHPCR\PropertyType) and <tt>value</tt> (data for creating the
+     *      from PropertyType) and <tt>value</tt> (data for creating the
      *      property value - array for multivalue property)
      * @param string $path the absolute path of this item
      * @param Session the session instance
@@ -82,8 +93,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
      * @param boolean $new optional: set to true to make this property aware
      *      its not yet existing on the server. defaults to false
      */
-    public function __construct($factory, array $data, $path, Session $session,
-                                ObjectManager $objectManager, $new = false)
+    public function __construct(FactoryInterface $factory, array $data, $path, Session $session, ObjectManager $objectManager, $new = false)
     {
         parent::__construct($factory, $path, $session, $objectManager, $new);
 
@@ -91,17 +101,19 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
 
         if (empty($data) && $new) {
             return;
-        } elseif (! isset($data['value'])) {
-            throw new \InvalidArgumentException("Can't create property at $path without any data");
         }
 
-        if (isset($data['type']) && \PHPCR\PropertyType::UNDEFINED !== $data['type']) {
+        if (! isset($data['value'])) {
+            throw new InvalidArgumentException("Can't create property at $path without any data");
+        }
+
+        if (isset($data['type']) && PropertyType::UNDEFINED !== $data['type']) {
             $type = $data['type'];
             if (is_string($type)) {
                 $type = PropertyType::valueFromName($type);
             } elseif (!is_numeric($type)) {
                 // @codeCoverageIgnoreStart
-                throw new \PHPCR\RepositoryException("INTERNAL ERROR -- No valid type specified ($type)");
+                throw new RepositoryException("INTERNAL ERROR -- No valid type specified ($type)");
                 // @codeCoverageIgnoreEnd
             } else {
                 //sanity check. this will throw InvalidArgumentException if $type is not a valid type
@@ -133,13 +145,14 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
             $this->value = PropertyType::convertType($data['value'], $type);
         } else {
             // @codeCoverageIgnoreStart
-            throw new \PHPCR\RepositoryException('INTERNAL ERROR -- data[value] may not be null');
+            throw new RepositoryException('INTERNAL ERROR -- data[value] may not be null');
             // @codeCoverageIgnoreEnd
         }
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function setValue($value, $type = PropertyType::UNDEFINED)
@@ -155,8 +168,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         $this->_setValue($value, $type);
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function addValue($value)
@@ -164,7 +178,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         $this->checkState();
 
         if (!$this->isMultiple()) {
-            throw new \PHPCR\ValueFormatException('You can not add values to non-multiple properties');
+            throw new ValueFormatException('You can not add values to non-multiple properties');
         }
         $this->value[] = PropertyType::convertType($value, $this->type);
         $this->setModified();
@@ -186,8 +200,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         }
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getValue()
@@ -225,8 +240,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $value;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getString()
@@ -242,8 +258,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->value;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getBinary()
@@ -274,8 +291,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         }
 
         if (! $this->wrapBinaryStreams) {
-            throw new \LogicException("Attempting to create 'jackalope' stream instances but stream wrapper is not activated");
+            throw new LogicException("Attempting to create 'jackalope' stream instances but stream wrapper is not activated");
         }
+
         // return wrapped stream
         if ($this->isMultiple()) {
             $results = array();
@@ -287,14 +305,16 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
             }
             return $results;
         }
+
         // single property case
         $result = fopen('jackalope://' . $this->session->getRegistryKey() . $this->path , 'rwb+');
         $this->streams[] = $result;
         return $result;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getLong()
@@ -307,8 +327,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->value;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDouble()
@@ -321,8 +342,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->value;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDecimal()
@@ -335,8 +357,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->value;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDate()
@@ -349,8 +372,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->value;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getBoolean()
@@ -363,8 +387,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->value;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getNode()
@@ -381,9 +406,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
                         // OPTIMIZE: use objectManager->getNodes instead of looping
                         $results[] = $this->objectManager->getNode($value);
                     }
-                } catch(\PHPCR\ItemNotFoundException $e) {
+                } catch(ItemNotFoundException $e) {
                     // @codeCoverageIgnoreStart
-                    throw new \PHPCR\RepositoryException('Internal Error: Could not find a referenced node. This should be impossible.');
+                    throw new RepositoryException('Internal Error: Could not find a referenced node. This should be impossible.');
                     // @codeCoverageIgnoreEnd
                 }
                 break;
@@ -402,14 +427,15 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
                 }
                 break;
             default:
-                throw new \PHPCR\ValueFormatException('Property is not a REFERENCE, WEAKREFERENCE or PATH (or convertible to PATH)');
+                throw new ValueFormatException('Property is not a REFERENCE, WEAKREFERENCE or PATH (or convertible to PATH)');
         }
 
         return $this->isMultiple() ? $results : $results[0];
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getProperty()
@@ -428,15 +454,16 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
                 }
                 break;
             default:
-                throw new \PHPCR\ValueFormatException('Property is not a PATH (or convertible to PATH)');
+                throw new ValueFormatException('Property is not a PATH (or convertible to PATH)');
         }
 
         return $this->isMultiple() ? $results : $results[0];
 
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getLength()
@@ -453,7 +480,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         foreach ($vals as $value) {
             try {
                 $ret[] = strlen(PropertyType::convertType($value, PropertyType::STRING, $this->type));
-            } catch (\Exception $e) {
+            } catch (Exception $e) {
                 // @codeCoverageIgnoreStart
                 $ret[] = -1;
                 // @codeCoverageIgnoreEnd
@@ -463,8 +490,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->isMultiple ? $ret : $ret[0];
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getDefinition()
@@ -477,8 +505,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->definition;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function getType()
@@ -488,8 +517,9 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         return $this->type;
     }
 
-    // inherit all doc
     /**
+     * {@inheritDoc}
+     *
      * @api
      */
     public function isMultiple()
@@ -561,13 +591,13 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
                 return;
                 // @codeCoverageIgnoreEnd
             }
-            throw new \PHPCR\InvalidItemStateException('This property is deleted');
+            throw new InvalidItemStateException('This property is deleted');
         }
         // Let the node refresh us
         try {
             // do not use getParent to avoid checkState - could lead to an endless loop
             $this->objectManager->getNodeByPath($this->parentPath)->refresh($keepChanges);
-        } catch (\PHPCR\ItemNotFoundException $e) {
+        } catch (ItemNotFoundException $e) {
             $this->setDeleted();
         }
     }
@@ -593,7 +623,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         }
         if (! is_integer($type)) {
             // @codeCoverageIgnoreStart
-            throw new \InvalidArgumentException("The type has to be one of the numeric constants defined in PHPCR\PropertyType. $type");
+            throw new InvalidArgumentException("The type has to be one of the numeric constants defined in PHPCR\\PropertyType. $type");
             // @codeCoverageIgnoreEnd
         }
         if ($this->isNew()) {
@@ -601,7 +631,7 @@ class Property extends Item implements \IteratorAggregate, \PHPCR\PropertyInterf
         }
 
         if (is_array($value) && !$this->isMultiple) {
-            throw new \PHPCR\ValueFormatException('Can not set a single value property ('.$this->name.') with an array of values');
+            throw new ValueFormatException('Can not set a single value property ('.$this->name.') with an array of values');
         }
 
         //TODO: check if changing type allowed.
