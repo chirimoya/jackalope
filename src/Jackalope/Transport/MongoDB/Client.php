@@ -25,6 +25,7 @@ namespace Jackalope\Transport\MongoDB;
 use PHPCR\PropertyType;
 use PHPCR\RepositoryException;
 use PHPCR\Util\UUIDHelper;
+use PHPCR\Util\QOM\Sql2ToQomQueryConverter;
 
 use Jackalope\Transport\BaseTransport;
 use Jackalope\Transport\QueryInterface;
@@ -1241,7 +1242,12 @@ class Client extends BaseTransport implements WritingInterface, WorkspaceManagem
 
         switch ($query->getLanguage()) {
             case \PHPCR\Query\QueryInterface::JCR_SQL2:
-                $parser = new \PHPCR\Util\QOM\Sql2ToQomQueryConverter(new \Jackalope\Query\QOM\QueryObjectModelFactory());
+                $parser = new Sql2ToQomQueryConverter($this->factory->get('Jackalope\Query\QOM\QueryObjectModelFactory'));
+                try {
+                    $query = $parser->parse($query->getStatement());
+                } catch (\Exception $e) {
+                    throw new InvalidQueryException('Invalid query: '.$query->getStatement());
+                }
                 $qom = $parser->parse($query->getStatement());
                
                 $coll = $this->db->selectCollection(self::COLLNAME_NODES);
