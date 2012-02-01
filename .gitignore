@@ -6,6 +6,7 @@ test-reports
 .project
 .buildpath
 .settings/
+.idea/
 cscope.out
 doc/config/phpdoc.ini
 doc/html

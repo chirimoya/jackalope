@@ -44,9 +44,9 @@ class QOMWalker
         
         $this->walkSource($qom->getSource());
         
-        $contraint = $qom->getConstraint();
-        if ($contraint) {
-            $this->walkConstraint($contraint);
+        $constraint = $qom->getConstraint();
+        if ($constraint) {
+            $this->walkConstraint($constraint);
         }
         
         $orderings = $qom->getOrderings();
