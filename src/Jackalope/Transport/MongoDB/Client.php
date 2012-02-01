@@ -25,6 +25,7 @@ namespace Jackalope\Transport\MongoDB;
 use PHPCR\PropertyType;
 use PHPCR\RepositoryException;
 use PHPCR\CredentialsInterface;
+use PHPCR\PropertyInterface;
 use PHPCR\NodeInterface;
 use PHPCR\Util\UUIDHelper;
 use PHPCR\Util\QOM\Sql2ToQomQueryConverter;
