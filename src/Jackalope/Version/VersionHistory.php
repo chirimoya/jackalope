@@ -4,6 +4,7 @@ namespace Jackalope\Version;
 
 use ArrayIterator;
 
+use PHPCR\Version\VersionHistoryInterface;
 use PHPCR\Version\VersionInterface;
 use PHPCR\Version\VersionException;
 
@@ -15,44 +16,23 @@ use Jackalope\FactoryInterface;
 /**
  * {@inheritDoc}
  *
+ * A special node that represents a nt:versionHistory node
+ *
  * @api
  */
-class VersionHistory extends Node
+class VersionHistory extends Node implements VersionHistoryInterface
 {
-    protected $objectmanager; //TODO if we would use parent constructor, this would be present
-    protected $path; //TODO if we would use parent constructor, this would be present
-
     /**
-     * @var PHPCR\Version\VersionInterface
-     */
-    protected $versionNode = null;
-    /**
-     * @var PHPCR\Version\VersionInterface
-     */
-    protected $rootVersion = null;
-    /**
-     * Cache of all versions to only fetch them once.
+     * Cache of all versions to only build the list once
      * @var array
      */
     protected $versions = null;
 
     /**
-     * FIXME: is this sane? we do not call the parent constructor
-     *
-     * @param FactoryInterface $factory the object factory
-     * @param ObjectManager $objectmanager
-     * @param string $absPath the repository path of this version history.
+     * Cache of the linear versions to only build the list once
+     * @var array
      */
-    public function __construct(FactoryInterface $factory, ObjectManager $objectmanager, $absPath)
-    {
-        $this->objectmanager = $objectmanager;
-        $this->path = $absPath;
-
-        // will trigger exception required by VersionManager.getVersionHistory
-        // in case there is no such node or it is not versionable
-        $uuid = $this->objectmanager->getVersionHistory($this->path);
-        $this->versionNode = $this->objectmanager->getNode($uuid, '/', 'Version\\Version');
-    }
+    protected $linearVersions = null;
 
     /**
      * {@inheritDoc}
@@ -61,7 +41,7 @@ class VersionHistory extends Node
      */
     public function getVersionableIdentifier()
     {
-        return $this->versionNode->getPropertyValue('jcr:versionableUuid');
+        return $this->getPropertyValue('jcr:versionableUuid');
     }
 
     /**
@@ -71,10 +51,7 @@ class VersionHistory extends Node
      */
     public function getRootVersion()
     {
-        if (! $this->rootVersion) {
-            $this->rootVersion = $this->objectmanager->getNode('jcr:rootVersion', $this->versionNode->getPath(), 'Version\\Version');
-        }
-        return $this->rootVersion;
+        return $this->objectManager->getNode('jcr:rootVersion', $this->getPath(), 'Version\\Version');
     }
 
     /**
@@ -84,7 +61,14 @@ class VersionHistory extends Node
      */
     public function getAllLinearVersions()
     {
-        throw new NotImplementedException();
+        // OPTIMIZE: special iterator that delays loading the versions
+        if (!$this->linearVersions) {
+            $version = $this->getRootVersion();
+            do {
+                $this->linearVersions[$version->getName()] = $version;
+            } while($version = $version->getLinearSuccessor());
+        }
+        return new ArrayIterator($this->linearVersions);
     }
 
     /**
@@ -94,6 +78,7 @@ class VersionHistory extends Node
      */
     public function getAllVersions()
     {
+        // OPTIMIZE: special iterator that delays loading the versions
         if (!$this->versions) {
             $rootVersion = $this->getRootVersion();
             $results[$rootVersion->getName()] = $rootVersion;
@@ -118,7 +103,8 @@ class VersionHistory extends Node
         $results = array();
         foreach ($successors as $successor) {
             $results[$successor->getName()] = $successor;
-            $results = array_merge($results, $this->getEventualSuccessors($successor)); //TODO: remove end recursion
+            // OPTIMIZE: use a stack instead of recursion
+            $results = array_merge($results, $this->getEventualSuccessors($successor));
         }
         return $results;
     }
@@ -130,7 +116,12 @@ class VersionHistory extends Node
      */
     public function getAllLinearFrozenNodes()
     {
-        throw new NotImplementedException();
+        // OPTIMIZE: special iterator that delays loading frozen nodes
+        $frozenNodes = array();
+        foreach($this->getAllLinearVersions() as $version) {
+            $frozenNodes[$version->getName()] = $version->getFrozenNode();
+        }
+        return new ArrayIterator($frozenNodes);
     }
 
     /**
@@ -140,7 +131,12 @@ class VersionHistory extends Node
      */
     public function getAllFrozenNodes()
     {
-        throw new NotImplementedException();
+        // OPTIMIZE: special iterator that delays loading frozen nodes
+        $frozenNodes = array();
+        foreach($this->getAllVersions() as $version) {
+            $frozenNodes[$version->getName()] = $version->getFrozenNode();
+        }
+        return new ArrayIterator($frozenNodes);
     }
 
     /**
@@ -165,7 +161,9 @@ class VersionHistory extends Node
      */
     public function getVersionByLabel($label)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -175,7 +173,9 @@ class VersionHistory extends Node
      */
     public function addVersionLabel($versionName, $label, $moveLabel)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -185,7 +185,9 @@ class VersionHistory extends Node
      */
     public function removeVersionLabel($label)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -195,7 +197,9 @@ class VersionHistory extends Node
      */
     public function hasVersionLabel($label, $version = null)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -205,7 +209,9 @@ class VersionHistory extends Node
      */
     public function getVersionLabels($version = null)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -215,35 +221,12 @@ class VersionHistory extends Node
      */
     public function removeVersion($versionName)
     {
-        $uuid = $this->objectmanager->getVersionHistory($this->path);
-        $historyNode = $this->objectmanager->getNode($uuid, '/', 'Version\\Version');
+        $version = $this->getVersion($versionName);
 
-        try {
-            $version = $this->objectmanager->getNodeByPath($historyNode->getPath().'/'.$versionName, 'Version\\Version');
-        } catch (\PHPCR\ItemNotFoundException $e) {
-            throw new VersionException("No version $versionName in the history", $e->getCode(), $e);
-        }
+        $version->setCachedPredecessorsDirty();
+        $version->setCachedSuccessorsDirty();
 
-        // only set other versions dirty if they are cached, no need to load them from backend just to tell they need to be reloaded
-        if ($version->hasProperty('jcr:predecessors')) {
-            foreach ($version->getProperty('jcr:predecessors')->getString() as $preuuid) {
-                $pre = $this->objectmanager->getCachedNodeByUuid($preuuid, 'Version\\Version');
-                if ($pre) {
-                    $pre->setDirty();
-                }
-            }
-        }
-        if ($version->hasProperty('jcr:successor')) {
-            foreach($version->getProperty('jcr:successor')->getString() as $postuuid) {
-                $post = $this->objectmanager->getCachedNodeByUuid($postuuid, 'Version\\Version');
-                if ($post) {
-                    $post->setDirty();
-                }
-            }
-        }
-
-
-        $this->objectmanager->removeVersion($historyNode->getPath(), $versionName);
+        $this->objectManager->removeVersion($this->getPath(), $versionName);
 
         if (!is_null($this->versions)) {
             unset($this->versions[$versionName]);
@@ -259,5 +242,4 @@ class VersionHistory extends Node
     {
         $this->versions = null;
     }
-
 }

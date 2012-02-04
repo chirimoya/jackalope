@@ -5,6 +5,7 @@ namespace Jackalope\Version;
 use PHPCR\NodeInterface;
 use PHPCR\PathNotFoundException;
 use PHPCR\UnsupportedRepositoryOperationException;
+use PHPCR\InvalidItemStateException;
 
 use PHPCR\Version\VersionInterface;
 use PHPCR\Version\VersionManagerInterface;
@@ -23,14 +24,9 @@ class VersionManager implements VersionManagerInterface {
     /**
      * @var ObjectManager
      */
-    protected $objectmanager;
+    protected $objectManager;
     /** @var FactoryInterface   The jackalope object factory for this object */
     protected $factory;
-
-    /**
-     * @var array of VersionHistory
-     */
-    protected $versionHistories = array();
 
     /**
      * Create the version manager - there should be only one per session.
@@ -38,9 +34,9 @@ class VersionManager implements VersionManagerInterface {
      * @param FactoryInterface $factory the object factory
      * @param ObjectManager $objectManager
      */
-    public function __construct(FactoryInterface $factory, ObjectManager $objectmanager)
+    public function __construct(FactoryInterface $factory, ObjectManager $objectManager)
     {
-        $this->objectmanager = $objectmanager;
+        $this->objectManager = $objectManager;
         $this->factory = $factory;
     }
 
@@ -51,12 +47,19 @@ class VersionManager implements VersionManagerInterface {
      */
      public function checkin($absPath)
      {
-         //FIXME: make sure this doc above is correct:
-         // If this node is already checked-in, this method has no effect but returns
-         // the current base version of this node.
-         $version = $this->objectmanager->checkin($absPath);
-         if (array_key_exists($absPath, $this->versionHistories)) {
-             $this->versionHistories[$absPath]->notifyHistoryChanged();
+         if ($node = $this->objectManager->getCachedNode($absPath)) {
+             if ($node->isModified()) {
+                 throw new \PHPCR\InvalidItemStateException("You may not checkin node at $absPath with pending unsaved changes");
+             }
+         }
+         $version = $this->objectManager->checkin($absPath);
+         $version->setCachedPredecessorsDirty();
+         if ($history = $this->objectManager->getCachedNode(dirname($version->getPath()), 'Version\\VersionHistory')) {
+             $history->notifyHistoryChanged();
+         }
+         if ($node) {
+             // OPTIMIZE: set property jcr:isCheckedOut on node directly? but without triggering write on save()
+             $node->setDirty();
          }
          return $version;
      }
@@ -68,7 +71,11 @@ class VersionManager implements VersionManagerInterface {
      */
      public function checkout($absPath)
      {
-         $this->objectmanager->checkout($absPath);
+         $this->objectManager->checkout($absPath);
+         if ($node = $this->objectManager->getCachedNode($absPath)) {
+             // OPTIMIZE: set property jcr:isCheckedOut on node directly? but without triggering write on save()
+             $node->setDirty();
+         }
      }
 
     /**
@@ -90,7 +97,12 @@ class VersionManager implements VersionManagerInterface {
      */
     public function isCheckedOut($absPath)
     {
-        throw new NotImplementedException();
+        $node = $this->objectManager->getNode($absPath);
+        if (! $node->isNodeType('mix:simpleVersionable')) {
+            throw new UnsupportedRepositoryOperationException("Node at $absPath is not versionable");
+        }
+
+        return $node->getPropertyValue('jcr:isCheckedOut');
     }
 
     /**
@@ -100,10 +112,12 @@ class VersionManager implements VersionManagerInterface {
      */
     public function getVersionHistory($absPath)
     {
-        if (! isset($this->versionHistories[$absPath])) {
-            $this->versionHistories[$absPath] = $this->factory->get('Version\\VersionHistory', array($this->objectmanager, $absPath));
+        $node = $this->objectManager->getNode($absPath);
+        if (! $node->isNodeType('mix:simpleVersionable')) {
+            throw new UnsupportedRepositoryOperationException("Node at $absPath is not versionable");
         }
-        return $this->versionHistories[$absPath];
+
+        return $this->objectManager->getNode($node->getProperty('jcr:versionHistory')->getString(), '/', 'Version\\VersionHistory');
     }
 
     /**
@@ -113,14 +127,14 @@ class VersionManager implements VersionManagerInterface {
      */
     public function getBaseVersion($absPath)
     {
-        $node = $this->objectmanager->getNodeByPath($absPath);
+        $node = $this->objectManager->getNodeByPath($absPath);
         try {
             //TODO: could check if node has versionable mixin type
             $uuid = $node->getProperty('jcr:baseVersion')->getString();
         } catch(PathNotFoundException $e) {
             throw new UnsupportedRepositoryOperationException("No jcr:baseVersion version for $absPath");
         }
-        return $this->objectmanager->getNode($uuid, '/', 'Version\\Version');
+        return $this->objectManager->getNode($uuid, '/', 'Version\\Version');
     }
 
     /**
@@ -130,17 +144,43 @@ class VersionManager implements VersionManagerInterface {
      */
     public function restore($removeExisting, $version, $absPath = null)
     {
-        //FIXME: This does not handle all cases
-        if (! $absPath) {
-            throw new NotImplementedException();
+        if ($this->objectManager->hasPendingChanges()) {
+            throw new \PHPCR\InvalidItemStateException('You may not call restore when there pending unsaved changes');
         }
-        if (! is_string($version)) {
-            throw new NotImplementedException();
+
+        if (is_string($version)) {
+            if (! is_string($absPath)) {
+                throw new \InvalidArgumentException('To restore version by version name you need to specify the path to the node you want to restore to this name');
+            }
+            $vh = $this->getVersionHistory($absPath);
+            $version = $vh->getVersion($version);
+            $versionPath = $version->getPath();
+            $nodePath = $absPath;
+
+        } elseif (is_array($version)) {
+            // @codeCoverageIgnoreStart
+            throw new NotImplementedException('TODO: implement restoring a list of versions');
+            // @codeCoverageIgnoreEnd
+
+        } elseif ($version instanceof VersionInterface && is_string($absPath)) {
+            // @codeCoverageIgnoreStart
+            throw new NotImplementedException('TODO: implement restoring a version to a specified path');
+            // @codeCoverageIgnoreEnd
+
+        }  elseif ($version instanceof VersionInterface) {
+            $versionPath = $version->getPath();
+            $nodePath = $this->objectManager->getNode($version->getContainingHistory()->getVersionableIdentifier())->getPath();
+
+        } else {
+            throw new \InvalidArgumentException();
         }
-        $vh = $this->getVersionHistory($absPath);
-        $version = $vh->getVersion($version);
-        $vpath = $version->getPath();
-        $this->objectmanager->restore($removeExisting, $vpath, $absPath);
+
+        $this->objectManager->restore($removeExisting, $versionPath, $nodePath);
+
+        $version->setCachedPredecessorsDirty();
+        if ($history = $this->objectManager->getCachedNode(dirname($version->getPath()), 'Version\\VersionHistory')) {
+            $history->notifyHistoryChanged();
+        }
     }
 
     /**
@@ -150,7 +190,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function restoreByLabel($absPath, $versionLabel, $removeExisting)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -160,7 +202,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function merge($source, $srcWorkspace = null, $bestEffort = null, $isShallow = false)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -170,7 +214,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function doneMerge($absPath, VersionInterface $version)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -180,7 +226,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function cancelMerge($absPath, VersionInterface $version)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -190,7 +238,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function createConfiguration($absPath, VersionInterface $baseline)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -200,7 +250,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function setActivity(NodeInterface $activity)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -210,7 +262,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function getActivity()
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -220,7 +274,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function createActivity($title)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
     /**
@@ -230,7 +286,9 @@ class VersionManager implements VersionManagerInterface {
      */
     public function removeActivity(NodeInterface $activityNode)
     {
+        // @codeCoverageIgnoreStart
         throw new NotImplementedException();
+        // @codeCoverageIgnoreEnd
     }
 
 }

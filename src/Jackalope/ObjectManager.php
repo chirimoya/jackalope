@@ -769,19 +769,15 @@ class ObjectManager
             }
         }
 
-        // commit changes to the local state
-        foreach ($this->itemsRemove as $path => $item) {
-            unset($this->objectsByPath['Node'][$path]);
-            // TODO: unset the node in $this->objectsByUuid if necessary
-        }
-
         //clear those lists before reloading the newly added nodes from backend, to avoid collisions
         $this->itemsRemove = array();
         $this->nodesMove = array();
 
         foreach ($this->itemsAdd as $path => $dummy) {
-            $item = $this->getNodeByPath($path);
-            $item->confirmSaved();
+            if (! isset($this->objectsByPath['Node'][$path])) {
+                throw new RepositoryException("Internal error: New node was not found in cache '$path'");
+            }
+            $this->objectsByPath['Node'][$path]->confirmSaved();
         }
         if (isset($this->objectsByPath['Node'])) {
             foreach ($this->objectsByPath['Node'] as $item) {
@@ -808,16 +804,7 @@ class ObjectManager
     {
         $path = $this->transport->checkinItem($absPath); //FIXME: what about pending move operations?
 
-        $node = $this->getNodeByPath($path, 'Version\\Version');
-        foreach($node->getProperty('jcr:predecessors')->getString() as $uuid) {
-            if (isset($this->objectsByUuid[$uuid])) {
-                $dirtyPath = $this->objectsByUuid[$uuid];
-                if (isset($this->objectsByPath['Version\\Version'][$dirtyPath])) {
-                    $this->objectsByPath['Version\\Version'][$dirtyPath]->setDirty();
-                }
-            }
-        }
-        return $node;
+        return $this->getNodeByPath($path, 'Version\\Version');
     }
     /**
      * Removes the cache of the predecessor version after the node has been
@@ -835,33 +822,31 @@ class ObjectManager
     }
 
     /**
-     * Removes the node's cache after it has been restored.
+     * Restore the node at $nodePath to the version at $versionPath
      *
-     * TODO: This is incomplete. Needs batch processing to avoid
-     * chicken-and-egg problems.
+     * Clears the node's cache after it has been restored.
+     *
+     * TODO: This is incomplete. Needs batch processing to implement restoring an array of versions
+     *
+     * @param bool $removeExisting whether to remove the existing current
+     *      version or create a new version after that version
+     * @param string $versionPath
+     * @param string $nodePath absolute path to the node
+     *
+     * @return void
      */
-    public function restore($removeExisting, $vpath, $absPath)
+    public function restore($removeExisting, $versionPath, $nodePath)
     {
-        if (null !== $absPath
-            && (isset($this->objectsByPath['Node'][$absPath]) || isset($this->objectsByPath['Version\\Version'][$absPath]))
-        ) {
-            unset($this->objectsByUuid[$this->objectsByPath['Node'][$absPath]->getIdentifier()]);
-            unset($this->objectsByPath['Version\Version'][$absPath]);
-            unset($this->objectsByPath['Node'][$absPath]);
-        }
-        $this->transport->restoreItem($removeExisting, $vpath, $absPath);  //FIXME: what about pending move operations?
-    }
+        // TODO: handle pending move operations?
 
-    /**
-     * Get the uuid of the version history node at $path
-     *
-     * @param string $path the path to the node we want the version
-     *
-     * @return string uuid of the version history node
-     */
-    public function getVersionHistory($path)
-    {
-        return $this->transport->getVersionHistory($this->resolveBackendPath($path));
+        if (isset($this->objectsByPath['Node'][$nodePath])) {
+            $this->objectsByPath['Node'][$nodePath]->setDirty();
+        }
+        if (isset($this->objectsByPath['Version\\Version'][$versionPath])) {
+            $this->objectsByPath['Version\\Version'][$versionPath]->setDirty();
+        }
+
+        $this->transport->restoreItem($removeExisting, $versionPath, $nodePath);
     }
 
     /**
@@ -1473,7 +1458,7 @@ class ObjectManager
      */
     public function getCachedNode($absPath, $class = 'Node')
     {
-        if (array_key_exists($absPath, $this->objectsByPath[$class])) {
+        if (isset($this->objectsByPath[$class][$absPath])) {
             return $this->objectsByPath[$class][$absPath];
         } elseif (array_key_exists($absPath, $this->itemsRemove)) {
             return $this->itemsRemove[$absPath];
